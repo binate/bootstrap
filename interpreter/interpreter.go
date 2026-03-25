@@ -19,7 +19,8 @@ type Interpreter struct {
 	stdout   *strings.Builder // captured output (nil = write to os.Stdout)
 	files    map[int]*os.File // open file descriptors
 	nextFD   int              // next file descriptor to allocate
-	packages map[string]*Env  // imported package environments
+	packages     map[string]*Env    // package path -> env
+	importAliases map[string]string // local name -> package path
 }
 
 // Env represents a variable environment (frame).
@@ -86,7 +87,8 @@ func New() *Interpreter {
 		types:    make(map[string]types.Type),
 		files:    map[int]*os.File{0: os.Stdin, 1: os.Stdout, 2: os.Stderr},
 		nextFD:   3,
-		packages: make(map[string]*Env),
+		packages:      make(map[string]*Env),
+		importAliases: make(map[string]string),
 	}
 	interp.env = newEnv(nil)
 	interp.registerBuiltins()
@@ -305,11 +307,25 @@ func (interp *Interpreter) registerBootstrapPackage() {
 	pkg.define("STDOUT", &IntVal{Val: 1, Typ: types.Typ_int})
 	pkg.define("STDERR", &IntVal{Val: 2, Typ: types.Typ_int})
 
-	interp.packages["bootstrap"] = pkg
+	interp.packages["pkg/bootstrap"] = pkg
 }
 
 // Run executes a parsed and type-checked file.
 func (interp *Interpreter) Run(file *ast.File, checker *types.Checker) {
+	// Register imports — map local names to package paths
+	for _, imp := range file.Imports {
+		path := imp.Path.Value
+		if len(path) >= 2 {
+			path = path[1 : len(path)-1]
+		}
+		name := imp.Alias
+		if name == "" {
+			parts := strings.Split(path, "/")
+			name = parts[len(parts)-1]
+		}
+		interp.importAliases[name] = path
+	}
+
 	// Register types and functions, evaluate top-level vars/consts
 	interp.env = newEnv(interp.env) // package scope
 
@@ -1165,12 +1181,14 @@ func (interp *Interpreter) evalSlice(e *ast.SliceExpr) Value {
 func (interp *Interpreter) evalSelector(e *ast.SelectorExpr) Value {
 	// Package-qualified access: pkg.Name
 	if ident, ok := e.X.(*ast.Ident); ok {
-		if pkg, ok := interp.packages[ident.Name]; ok {
-			val, found := pkg.get(e.Sel.Name)
-			if !found {
-				panic(fmt.Sprintf("package %s has no member %s", ident.Name, e.Sel.Name))
+		if pkgPath, ok := interp.importAliases[ident.Name]; ok {
+			if pkg, ok := interp.packages[pkgPath]; ok {
+				val, found := pkg.get(e.Sel.Name)
+				if !found {
+					panic(fmt.Sprintf("package %s has no member %s", ident.Name, e.Sel.Name))
+				}
+				return val
 			}
-			return val
 		}
 	}
 

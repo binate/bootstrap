@@ -1,6 +1,6 @@
 package "main"
 
-import "bootstrap"
+import "pkg/bootstrap"
 
 func main() {
 	a := bootstrap.args()

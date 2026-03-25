@@ -77,7 +77,7 @@ func NewChecker() *Checker {
 		packages: make(map[string]*Scope),
 	}
 	c.scope = c.universeScope()
-	c.packages["bootstrap"] = c.bootstrapPackageScope()
+	c.packages["pkg/bootstrap"] = c.bootstrapPackageScope()
 	return c
 }
 

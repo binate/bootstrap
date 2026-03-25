@@ -626,7 +626,7 @@ func main() {
 func TestStringConversion(t *testing.T) {
 	src := `package "main"
 
-import "bootstrap"
+import "pkg/bootstrap"
 
 func main() {
 	x := 42
