@@ -1,0 +1,23 @@
+package "main"
+
+func main() {
+	a := args()
+	if len(a) == 0 {
+		println("usage: cat <file>")
+		exit(1)
+	}
+	fd := open(a[0], 0)
+	if fd < 0 {
+		println("error: could not open file")
+		exit(1)
+	}
+	buf := make([]byte, 4096)
+	for {
+		n := read(fd, buf, 4096)
+		if n <= 0 {
+			break
+		}
+		write(1, buf, n)
+	}
+	close(fd)
+}

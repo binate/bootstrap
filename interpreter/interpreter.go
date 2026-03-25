@@ -17,6 +17,8 @@ type Interpreter struct {
 	funcs  map[string]*ast.FuncDecl
 	types  map[string]types.Type
 	stdout *strings.Builder // captured output (nil = write to os.Stdout)
+	files  map[int]*os.File // open file descriptors
+	nextFD int              // next file descriptor to allocate
 }
 
 // Env represents a variable environment (frame).
@@ -79,8 +81,10 @@ type signalContinue struct{}
 // New creates a new interpreter.
 func New() *Interpreter {
 	interp := &Interpreter{
-		funcs: make(map[string]*ast.FuncDecl),
-		types: make(map[string]types.Type),
+		funcs:  make(map[string]*ast.FuncDecl),
+		types:  make(map[string]types.Type),
+		files:  map[int]*os.File{0: os.Stdin, 1: os.Stdout, 2: os.Stderr},
+		nextFD: 3,
 	}
 	interp.env = newEnv(nil)
 	interp.registerBuiltins()
@@ -140,6 +144,143 @@ func (interp *Interpreter) registerBuiltins() {
 			}
 			os.Exit(code)
 			return &NilVal{}
+		},
+	})
+	// append: append(slice, elems...) -> new slice
+	interp.env.define("append", &BuiltinFuncVal{
+		Name: "append",
+		Fn: func(args []Value) Value {
+			if len(args) < 2 {
+				panic("append requires at least 2 arguments")
+			}
+			sv, ok := args[0].(*SliceVal)
+			if !ok {
+				panic(fmt.Sprintf("append: first argument must be a slice, got %T", args[0]))
+			}
+			newElems := make([]Value, len(sv.Elems), len(sv.Elems)+len(args)-1)
+			copy(newElems, sv.Elems)
+			for _, a := range args[1:] {
+				newElems = append(newElems, a)
+			}
+			return &SliceVal{Elems: newElems, Typ: sv.Typ}
+		},
+	})
+	// panic
+	interp.env.define("panic", &BuiltinFuncVal{
+		Name: "panic",
+		Fn: func(args []Value) Value {
+			msg := "panic"
+			if len(args) > 0 {
+				msg = args[0].String()
+			}
+			panic(msg)
+		},
+	})
+	// string: convert value to string
+	interp.env.define("string", &BuiltinFuncVal{
+		Name: "string",
+		Fn: func(args []Value) Value {
+			if len(args) == 0 {
+				return &StringVal{Val: ""}
+			}
+			// []byte / []uint8 → string
+			if sv, ok := args[0].(*SliceVal); ok {
+				var buf []byte
+				for _, e := range sv.Elems {
+					if iv, ok := e.(*IntVal); ok {
+						buf = append(buf, byte(iv.Val))
+					}
+				}
+				return &StringVal{Val: string(buf)}
+			}
+			// char → string
+			if cv, ok := args[0].(*CharVal); ok {
+				return &StringVal{Val: string(cv.Val)}
+			}
+			// int → string (decimal)
+			if iv, ok := args[0].(*IntVal); ok {
+				return &StringVal{Val: strconv.FormatInt(iv.Val, 10)}
+			}
+			return &StringVal{Val: args[0].String()}
+		},
+	})
+	// open: open(path string, mode int) int — returns fd
+	interp.env.define("open", &BuiltinFuncVal{
+		Name: "open",
+		Fn: func(args []Value) Value {
+			if len(args) < 2 {
+				panic("open requires 2 arguments: path, flags")
+			}
+			path := args[0].(*StringVal).Val
+			flags := int(args[1].(*IntVal).Val)
+			fd, err := interp.openFile(path, flags)
+			if err != nil {
+				return &IntVal{Val: -1, Typ: types.Typ_int}
+			}
+			return &IntVal{Val: int64(fd), Typ: types.Typ_int}
+		},
+	})
+	// read: read(fd int, buf []byte, n int) int — returns bytes read
+	interp.env.define("read", &BuiltinFuncVal{
+		Name: "read",
+		Fn: func(args []Value) Value {
+			if len(args) < 3 {
+				panic("read requires 3 arguments: fd, buf, n")
+			}
+			fd := int(args[0].(*IntVal).Val)
+			buf := args[1].(*SliceVal)
+			n := int(args[2].(*IntVal).Val)
+			nRead := interp.readFile(fd, buf, n)
+			return &IntVal{Val: int64(nRead), Typ: types.Typ_int}
+		},
+	})
+	// write: write(fd int, data []byte, n int) int — returns bytes written
+	interp.env.define("write", &BuiltinFuncVal{
+		Name: "write",
+		Fn: func(args []Value) Value {
+			if len(args) < 3 {
+				panic("write requires 3 arguments: fd, data, n")
+			}
+			fd := int(args[0].(*IntVal).Val)
+			data := args[1].(*SliceVal)
+			n := int(args[2].(*IntVal).Val)
+			nWritten := interp.writeFile(fd, data, n)
+			return &IntVal{Val: int64(nWritten), Typ: types.Typ_int}
+		},
+	})
+	// close: close(fd int) int — returns 0 on success
+	interp.env.define("close", &BuiltinFuncVal{
+		Name: "close",
+		Fn: func(args []Value) Value {
+			if len(args) < 1 {
+				panic("close requires 1 argument: fd")
+			}
+			fd := int(args[0].(*IntVal).Val)
+			err := interp.closeFile(fd)
+			if err != 0 {
+				return &IntVal{Val: int64(err), Typ: types.Typ_int}
+			}
+			return &IntVal{Val: 0, Typ: types.Typ_int}
+		},
+	})
+	// args: args() []string — returns command-line arguments (excluding program name)
+	interp.env.define("args", &BuiltinFuncVal{
+		Name: "args",
+		Fn: func(args []Value) Value {
+			// Skip os.Args[0] (the binary) and os.Args[1] (the .bn file)
+			osArgs := os.Args
+			start := 2
+			if start > len(osArgs) {
+				start = len(osArgs)
+			}
+			elems := make([]Value, len(osArgs)-start)
+			for i, a := range osArgs[start:] {
+				elems[i] = &StringVal{Val: a}
+			}
+			return &SliceVal{
+				Elems: elems,
+				Typ:   &types.SliceType{Elem: types.Typ_string},
+			}
 		},
 	})
 }
@@ -1384,4 +1525,125 @@ func unescapeChar(s string) rune {
 		}
 	}
 	return rune(s[1])
+}
+
+// ============================================================
+// File I/O
+// ============================================================
+
+// File open flags (matching POSIX conventions).
+const (
+	O_RDONLY = 0
+	O_WRONLY = 1
+	O_RDWR   = 2
+	O_CREATE = 0x40
+	O_TRUNC  = 0x200
+	O_APPEND = 0x400
+)
+
+func (interp *Interpreter) openFile(path string, flags int) (int, error) {
+	goFlags := 0
+	switch flags & 3 {
+	case O_RDONLY:
+		goFlags = os.O_RDONLY
+	case O_WRONLY:
+		goFlags = os.O_WRONLY
+	case O_RDWR:
+		goFlags = os.O_RDWR
+	}
+	if flags&O_CREATE != 0 {
+		goFlags |= os.O_CREATE
+	}
+	if flags&O_TRUNC != 0 {
+		goFlags |= os.O_TRUNC
+	}
+	if flags&O_APPEND != 0 {
+		goFlags |= os.O_APPEND
+	}
+
+	f, err := os.OpenFile(path, goFlags, 0644)
+	if err != nil {
+		return -1, err
+	}
+	fd := interp.nextFD
+	interp.nextFD++
+	interp.files[fd] = f
+	return fd, nil
+}
+
+func (interp *Interpreter) readFile(fd int, buf *SliceVal, n int) int {
+	f, ok := interp.files[fd]
+	if !ok {
+		return -1
+	}
+	tmp := make([]byte, n)
+	nRead, err := f.Read(tmp)
+	if err != nil && nRead == 0 {
+		return -1
+	}
+	// Copy into the slice value
+	for i := 0; i < nRead && i < len(buf.Elems); i++ {
+		buf.Elems[i] = &IntVal{Val: int64(tmp[i]), Typ: types.Typ_uint8}
+	}
+	return nRead
+}
+
+func (interp *Interpreter) writeFile(fd int, data *SliceVal, n int) int {
+	// Special case: fd 1 (stdout) respects captured output
+	if fd == 1 && interp.stdout != nil {
+		for i := 0; i < n && i < len(data.Elems); i++ {
+			if iv, ok := data.Elems[i].(*IntVal); ok {
+				interp.stdout.WriteByte(byte(iv.Val))
+			}
+		}
+		return n
+	}
+	if fd == 2 && interp.stdout != nil {
+		// stderr still goes to real stderr even in test mode
+		f := interp.files[fd]
+		if f == nil {
+			return -1
+		}
+		buf := make([]byte, n)
+		for i := 0; i < n && i < len(data.Elems); i++ {
+			if iv, ok := data.Elems[i].(*IntVal); ok {
+				buf[i] = byte(iv.Val)
+			}
+		}
+		nw, _ := f.Write(buf)
+		return nw
+	}
+
+	f, ok := interp.files[fd]
+	if !ok {
+		return -1
+	}
+	buf := make([]byte, n)
+	for i := 0; i < n && i < len(data.Elems); i++ {
+		if iv, ok := data.Elems[i].(*IntVal); ok {
+			buf[i] = byte(iv.Val)
+		}
+	}
+	nWritten, err := f.Write(buf)
+	if err != nil {
+		return -1
+	}
+	return nWritten
+}
+
+func (interp *Interpreter) closeFile(fd int) int {
+	f, ok := interp.files[fd]
+	if !ok {
+		return -1
+	}
+	// Don't close stdin/stdout/stderr
+	if fd <= 2 {
+		return 0
+	}
+	err := f.Close()
+	delete(interp.files, fd)
+	if err != nil {
+		return -1
+	}
+	return 0
 }

@@ -601,3 +601,107 @@ func main() {
 		t.Errorf("expected %q, got %q", "sum: 3\n", got)
 	}
 }
+
+func TestAppend(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	s := make([]int, 0)
+	s = append(s, 10)
+	s = append(s, 20)
+	s = append(s, 30)
+	println(len(s))
+	println(s[0])
+	println(s[1])
+	println(s[2])
+}
+`
+	got := runProgram(t, src)
+	expect := "3\n10\n20\n30\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestStringConversion(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	x := 42
+	println(string(x))
+}
+`
+	got := runProgram(t, src)
+	if got != "42\n" {
+		t.Errorf("expected %q, got %q", "42\n", got)
+	}
+}
+
+func TestNestedStructs(t *testing.T) {
+	src := `package "main"
+
+type Point struct {
+	x int
+	y int
+}
+
+type Rect struct {
+	min Point
+	max Point
+}
+
+func area(r Rect) int {
+	return (r.max.x - r.min.x) * (r.max.y - r.min.y)
+}
+
+func main() {
+	r := Rect{
+		min: Point{x: 1, y: 2},
+		max: Point{x: 4, y: 6},
+	}
+	println(area(r))
+}
+`
+	got := runProgram(t, src)
+	if got != "12\n" {
+		t.Errorf("expected %q, got %q", "12\n", got)
+	}
+}
+
+func TestMethodLikePattern(t *testing.T) {
+	src := `package "main"
+
+type Stack struct {
+	data []int
+	size int
+}
+
+func newStack() Stack {
+	return Stack{data: make([]int, 0), size: 0}
+}
+
+func push(s Stack, val int) Stack {
+	s.data = append(s.data, val)
+	s.size++
+	return s
+}
+
+func top(s Stack) int {
+	return s.data[s.size - 1]
+}
+
+func main() {
+	s := newStack()
+	s = push(s, 10)
+	s = push(s, 20)
+	s = push(s, 30)
+	println(top(s))
+	println(s.size)
+}
+`
+	got := runProgram(t, src)
+	expect := "30\n3\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}

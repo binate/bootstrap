@@ -100,12 +100,38 @@ func (c *Checker) universeScope() *Scope {
 	s.define(&Symbol{Name: "false", Type: Typ_untypedBool, Kind: ConstSym})
 	s.define(&Symbol{Name: "nil", Type: Typ_nil, Kind: ConstSym})
 
-	// Builtin functions (interpreter-provided, variadic — use special marker)
-	builtinType := &FuncType{} // empty signature — checked specially
-	s.define(&Symbol{Name: "print", Type: builtinType, Kind: FuncSym})
-	s.define(&Symbol{Name: "println", Type: builtinType, Kind: FuncSym})
+	// Builtin functions — variadic ones get empty params (checked specially)
+	variadicType := &FuncType{} // empty signature — checked specially
+	s.define(&Symbol{Name: "print", Type: variadicType, Kind: FuncSym})
+	s.define(&Symbol{Name: "println", Type: variadicType, Kind: FuncSym})
 	s.define(&Symbol{Name: "exit", Type: &FuncType{
 		Params: []*Param{{Name: "code", Type: Typ_int}},
+	}, Kind: FuncSym})
+	s.define(&Symbol{Name: "append", Type: variadicType, Kind: FuncSym})
+	s.define(&Symbol{Name: "panic", Type: variadicType, Kind: FuncSym})
+	s.define(&Symbol{Name: "string", Type: variadicType, Kind: FuncSym})
+
+	// File I/O
+	s.define(&Symbol{Name: "open", Type: &FuncType{
+		Params:  []*Param{{Name: "path", Type: Typ_string}, {Name: "flags", Type: Typ_int}},
+		Results: []Type{Typ_int},
+	}, Kind: FuncSym})
+	s.define(&Symbol{Name: "read", Type: &FuncType{
+		Params:  []*Param{{Name: "fd", Type: Typ_int}, {Name: "buf", Type: &SliceType{Elem: Typ_uint8}}, {Name: "n", Type: Typ_int}},
+		Results: []Type{Typ_int},
+	}, Kind: FuncSym})
+	s.define(&Symbol{Name: "write", Type: &FuncType{
+		Params:  []*Param{{Name: "fd", Type: Typ_int}, {Name: "buf", Type: &SliceType{Elem: Typ_uint8}}, {Name: "n", Type: Typ_int}},
+		Results: []Type{Typ_int},
+	}, Kind: FuncSym})
+	s.define(&Symbol{Name: "close", Type: &FuncType{
+		Params:  []*Param{{Name: "fd", Type: Typ_int}},
+		Results: []Type{Typ_int},
+	}, Kind: FuncSym})
+
+	// Process
+	s.define(&Symbol{Name: "args", Type: &FuncType{
+		Results: []Type{&SliceType{Elem: Typ_string}},
 	}, Kind: FuncSym})
 	return s
 }
@@ -716,10 +742,22 @@ func (c *Checker) checkCallExpr(e *ast.CallExpr) Type {
 		c.errorf(e.Fun.Pos(), "cannot call non-function %s", fnType)
 		return Typ_void
 	}
-	// Variadic builtins (print, println) have empty param lists — just check args.
+	// Variadic builtins (print, println, append, etc.) have empty param lists — just check args.
 	if len(ft.Params) == 0 && len(e.Args) > 0 {
 		for _, arg := range e.Args {
 			c.checkExpr(arg)
+		}
+		// Infer return type for known variadic builtins
+		if ident, ok := e.Fun.(*ast.Ident); ok {
+			switch ident.Name {
+			case "append":
+				// append returns the same type as its first argument
+				if len(e.Args) > 0 {
+					return c.checkExpr(e.Args[0])
+				}
+			case "string":
+				return Typ_string
+			}
 		}
 	} else if len(e.Args) != len(ft.Params) {
 		c.errorf(e.Fun.Pos(), "wrong number of arguments: got %d, want %d",
