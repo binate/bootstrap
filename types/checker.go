@@ -11,10 +11,11 @@ import (
 
 // Checker performs type checking on an AST.
 type Checker struct {
-	file    *ast.File
-	errors  []CheckError
-	scope   *Scope
-	funcRet []Type // expected return types of current function
+	file     *ast.File
+	errors   []CheckError
+	scope    *Scope
+	funcRet  []Type // expected return types of current function
+	packages map[string]*Scope // imported package scopes
 }
 
 // CheckError represents a type-checking error.
@@ -29,9 +30,10 @@ func (e CheckError) Error() string {
 
 // Symbol represents a named entity in a scope.
 type Symbol struct {
-	Name string
-	Type Type
-	Kind SymbolKind
+	Name    string
+	Type    Type
+	Kind    SymbolKind
+	PkgPath string // for PkgSym: the import path
 }
 
 // SymbolKind classifies what a symbol refers to.
@@ -42,6 +44,7 @@ const (
 	ConstSym
 	TypeSym
 	FuncSym
+	PkgSym
 )
 
 // Scope represents a lexical scope.
@@ -70,8 +73,11 @@ func (s *Scope) lookup(name string) *Symbol {
 
 // NewChecker creates a new type checker.
 func NewChecker() *Checker {
-	c := &Checker{}
+	c := &Checker{
+		packages: make(map[string]*Scope),
+	}
 	c.scope = c.universeScope()
+	c.packages["bootstrap"] = c.bootstrapPackageScope()
 	return c
 }
 
@@ -104,14 +110,17 @@ func (c *Checker) universeScope() *Scope {
 	variadicType := &FuncType{} // empty signature — checked specially
 	s.define(&Symbol{Name: "print", Type: variadicType, Kind: FuncSym})
 	s.define(&Symbol{Name: "println", Type: variadicType, Kind: FuncSym})
-	s.define(&Symbol{Name: "exit", Type: &FuncType{
-		Params: []*Param{{Name: "code", Type: Typ_int}},
-	}, Kind: FuncSym})
 	s.define(&Symbol{Name: "append", Type: variadicType, Kind: FuncSym})
 	s.define(&Symbol{Name: "panic", Type: variadicType, Kind: FuncSym})
-	s.define(&Symbol{Name: "string", Type: variadicType, Kind: FuncSym})
+	return s
+}
 
-	// File I/O
+// bootstrapPackageScope creates the scope for the "bootstrap" package.
+func (c *Checker) bootstrapPackageScope() *Scope {
+	s := newScope(nil)
+	variadicType := &FuncType{} // variadic marker
+
+	// I/O
 	s.define(&Symbol{Name: "open", Type: &FuncType{
 		Params:  []*Param{{Name: "path", Type: Typ_string}, {Name: "flags", Type: Typ_int}},
 		Results: []Type{Typ_int},
@@ -130,9 +139,28 @@ func (c *Checker) universeScope() *Scope {
 	}, Kind: FuncSym})
 
 	// Process
+	s.define(&Symbol{Name: "exit", Type: &FuncType{
+		Params: []*Param{{Name: "code", Type: Typ_int}},
+	}, Kind: FuncSym})
 	s.define(&Symbol{Name: "args", Type: &FuncType{
 		Results: []Type{&SliceType{Elem: Typ_string}},
 	}, Kind: FuncSym})
+
+	// Conversions
+	s.define(&Symbol{Name: "string", Type: variadicType, Kind: FuncSym})
+
+	// Constants — file open flags
+	s.define(&Symbol{Name: "O_RDONLY", Type: Typ_int, Kind: ConstSym})
+	s.define(&Symbol{Name: "O_WRONLY", Type: Typ_int, Kind: ConstSym})
+	s.define(&Symbol{Name: "O_RDWR", Type: Typ_int, Kind: ConstSym})
+	s.define(&Symbol{Name: "O_CREATE", Type: Typ_int, Kind: ConstSym})
+	s.define(&Symbol{Name: "O_TRUNC", Type: Typ_int, Kind: ConstSym})
+	s.define(&Symbol{Name: "O_APPEND", Type: Typ_int, Kind: ConstSym})
+
+	// Constants — standard file descriptors
+	s.define(&Symbol{Name: "STDIN", Type: Typ_int, Kind: ConstSym})
+	s.define(&Symbol{Name: "STDOUT", Type: Typ_int, Kind: ConstSym})
+	s.define(&Symbol{Name: "STDERR", Type: Typ_int, Kind: ConstSym})
 	return s
 }
 
@@ -154,6 +182,26 @@ func (c *Checker) Check(file *ast.File) {
 
 	// Package scope
 	c.pushScope()
+
+	// Register imports as package names in the current scope
+	for _, imp := range file.Imports {
+		path := imp.Path.Value
+		// Strip quotes
+		if len(path) >= 2 {
+			path = path[1 : len(path)-1]
+		}
+		name := imp.Alias
+		if name == "" {
+			// Use the last segment of the path as the package name
+			parts := strings.Split(path, "/")
+			name = parts[len(parts)-1]
+		}
+		if _, ok := c.packages[path]; !ok {
+			c.errorf(imp.Pos(), "unknown package %q", path)
+			continue
+		}
+		c.scope.define(&Symbol{Name: name, Type: nil, Kind: PkgSym, PkgPath: path})
+	}
 
 	// Pass 1: collect all top-level declarations (types, functions, vars, consts).
 	c.collectDecls(file.Decls)
@@ -748,16 +796,14 @@ func (c *Checker) checkCallExpr(e *ast.CallExpr) Type {
 			c.checkExpr(arg)
 		}
 		// Infer return type for known variadic builtins
-		if ident, ok := e.Fun.(*ast.Ident); ok {
-			switch ident.Name {
-			case "append":
-				// append returns the same type as its first argument
-				if len(e.Args) > 0 {
-					return c.checkExpr(e.Args[0])
-				}
-			case "string":
-				return Typ_string
+		name := callFuncName(e)
+		switch name {
+		case "append":
+			if len(e.Args) > 0 {
+				return c.checkExpr(e.Args[0])
 			}
+		case "string", "bootstrap.string":
+			return Typ_string
 		}
 	} else if len(e.Args) != len(ft.Params) {
 		c.errorf(e.Fun.Pos(), "wrong number of arguments: got %d, want %d",
@@ -778,6 +824,19 @@ func (c *Checker) checkCallExpr(e *ast.CallExpr) Type {
 	}
 	// Multiple returns — return the FuncType itself for multi-assign detection
 	return ft
+}
+
+// callFuncName extracts a dotted name from a call expression's Fun.
+func callFuncName(e *ast.CallExpr) string {
+	switch fn := e.Fun.(type) {
+	case *ast.Ident:
+		return fn.Name
+	case *ast.SelectorExpr:
+		if ident, ok := fn.X.(*ast.Ident); ok {
+			return ident.Name + "." + fn.Sel.Name
+		}
+	}
+	return ""
 }
 
 func (c *Checker) checkIndexExpr(e *ast.IndexExpr) Type {
@@ -834,6 +893,23 @@ func (c *Checker) checkSliceExpr(e *ast.SliceExpr) Type {
 }
 
 func (c *Checker) checkSelectorExpr(e *ast.SelectorExpr) Type {
+	// Check for package-qualified access: pkg.Name
+	if ident, ok := e.X.(*ast.Ident); ok {
+		if sym := c.scope.lookup(ident.Name); sym != nil && sym.Kind == PkgSym {
+			pkgScope, ok := c.packages[sym.PkgPath]
+			if !ok {
+				c.errorf(ident.Pos(), "unknown package %s", ident.Name)
+				return Typ_void
+			}
+			member := pkgScope.lookup(e.Sel.Name)
+			if member == nil {
+				c.errorf(e.Sel.Pos(), "package %s has no member %s", ident.Name, e.Sel.Name)
+				return Typ_void
+			}
+			return member.Type
+		}
+	}
+
 	xt := c.checkExpr(e.X)
 
 	// Auto-dereference pointers for field access

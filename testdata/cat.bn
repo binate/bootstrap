@@ -1,23 +1,25 @@
 package "main"
 
+import "bootstrap"
+
 func main() {
-	a := args()
+	a := bootstrap.args()
 	if len(a) == 0 {
 		println("usage: cat <file>")
-		exit(1)
+		bootstrap.exit(1)
 	}
-	fd := open(a[0], 0)
+	fd := bootstrap.open(a[0], bootstrap.O_RDONLY)
 	if fd < 0 {
 		println("error: could not open file")
-		exit(1)
+		bootstrap.exit(1)
 	}
 	buf := make([]byte, 4096)
 	for {
-		n := read(fd, buf, 4096)
+		n := bootstrap.read(fd, buf, 4096)
 		if n <= 0 {
 			break
 		}
-		write(1, buf, n)
+		bootstrap.write(bootstrap.STDOUT, buf, n)
 	}
-	close(fd)
+	bootstrap.close(fd)
 }

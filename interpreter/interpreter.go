@@ -13,12 +13,13 @@ import (
 
 // Interpreter evaluates a Binate AST.
 type Interpreter struct {
-	env    *Env
-	funcs  map[string]*ast.FuncDecl
-	types  map[string]types.Type
-	stdout *strings.Builder // captured output (nil = write to os.Stdout)
-	files  map[int]*os.File // open file descriptors
-	nextFD int              // next file descriptor to allocate
+	env      *Env
+	funcs    map[string]*ast.FuncDecl
+	types    map[string]types.Type
+	stdout   *strings.Builder // captured output (nil = write to os.Stdout)
+	files    map[int]*os.File // open file descriptors
+	nextFD   int              // next file descriptor to allocate
+	packages map[string]*Env  // imported package environments
 }
 
 // Env represents a variable environment (frame).
@@ -81,13 +82,15 @@ type signalContinue struct{}
 // New creates a new interpreter.
 func New() *Interpreter {
 	interp := &Interpreter{
-		funcs:  make(map[string]*ast.FuncDecl),
-		types:  make(map[string]types.Type),
-		files:  map[int]*os.File{0: os.Stdin, 1: os.Stdout, 2: os.Stderr},
-		nextFD: 3,
+		funcs:    make(map[string]*ast.FuncDecl),
+		types:    make(map[string]types.Type),
+		files:    map[int]*os.File{0: os.Stdin, 1: os.Stdout, 2: os.Stderr},
+		nextFD:   3,
+		packages: make(map[string]*Env),
 	}
 	interp.env = newEnv(nil)
 	interp.registerBuiltins()
+	interp.registerBootstrapPackage()
 	return interp
 }
 
@@ -132,20 +135,6 @@ func (interp *Interpreter) registerBuiltins() {
 			return &NilVal{}
 		},
 	})
-	// exit
-	interp.env.define("exit", &BuiltinFuncVal{
-		Name: "exit",
-		Fn: func(args []Value) Value {
-			code := 0
-			if len(args) > 0 {
-				if iv, ok := args[0].(*IntVal); ok {
-					code = int(iv.Val)
-				}
-			}
-			os.Exit(code)
-			return &NilVal{}
-		},
-	})
 	// append: append(slice, elems...) -> new slice
 	interp.env.define("append", &BuiltinFuncVal{
 		Name: "append",
@@ -176,8 +165,27 @@ func (interp *Interpreter) registerBuiltins() {
 			panic(msg)
 		},
 	})
+}
+
+func (interp *Interpreter) registerBootstrapPackage() {
+	pkg := newEnv(nil)
+
+	// exit
+	pkg.define("exit", &BuiltinFuncVal{
+		Name: "exit",
+		Fn: func(args []Value) Value {
+			code := 0
+			if len(args) > 0 {
+				if iv, ok := args[0].(*IntVal); ok {
+					code = int(iv.Val)
+				}
+			}
+			os.Exit(code)
+			return &NilVal{}
+		},
+	})
 	// string: convert value to string
-	interp.env.define("string", &BuiltinFuncVal{
+	pkg.define("string", &BuiltinFuncVal{
 		Name: "string",
 		Fn: func(args []Value) Value {
 			if len(args) == 0 {
@@ -205,7 +213,7 @@ func (interp *Interpreter) registerBuiltins() {
 		},
 	})
 	// open: open(path string, mode int) int — returns fd
-	interp.env.define("open", &BuiltinFuncVal{
+	pkg.define("open", &BuiltinFuncVal{
 		Name: "open",
 		Fn: func(args []Value) Value {
 			if len(args) < 2 {
@@ -221,7 +229,7 @@ func (interp *Interpreter) registerBuiltins() {
 		},
 	})
 	// read: read(fd int, buf []byte, n int) int — returns bytes read
-	interp.env.define("read", &BuiltinFuncVal{
+	pkg.define("read", &BuiltinFuncVal{
 		Name: "read",
 		Fn: func(args []Value) Value {
 			if len(args) < 3 {
@@ -235,7 +243,7 @@ func (interp *Interpreter) registerBuiltins() {
 		},
 	})
 	// write: write(fd int, data []byte, n int) int — returns bytes written
-	interp.env.define("write", &BuiltinFuncVal{
+	pkg.define("write", &BuiltinFuncVal{
 		Name: "write",
 		Fn: func(args []Value) Value {
 			if len(args) < 3 {
@@ -249,7 +257,7 @@ func (interp *Interpreter) registerBuiltins() {
 		},
 	})
 	// close: close(fd int) int — returns 0 on success
-	interp.env.define("close", &BuiltinFuncVal{
+	pkg.define("close", &BuiltinFuncVal{
 		Name: "close",
 		Fn: func(args []Value) Value {
 			if len(args) < 1 {
@@ -264,7 +272,7 @@ func (interp *Interpreter) registerBuiltins() {
 		},
 	})
 	// args: args() []string — returns command-line arguments (excluding program name)
-	interp.env.define("args", &BuiltinFuncVal{
+	pkg.define("args", &BuiltinFuncVal{
 		Name: "args",
 		Fn: func(args []Value) Value {
 			// Skip os.Args[0] (the binary) and os.Args[1] (the .bn file)
@@ -283,6 +291,21 @@ func (interp *Interpreter) registerBuiltins() {
 			}
 		},
 	})
+
+	// Constants — file open flags
+	pkg.define("O_RDONLY", &IntVal{Val: 0, Typ: types.Typ_int})
+	pkg.define("O_WRONLY", &IntVal{Val: 1, Typ: types.Typ_int})
+	pkg.define("O_RDWR", &IntVal{Val: 2, Typ: types.Typ_int})
+	pkg.define("O_CREATE", &IntVal{Val: 0x40, Typ: types.Typ_int})
+	pkg.define("O_TRUNC", &IntVal{Val: 0x200, Typ: types.Typ_int})
+	pkg.define("O_APPEND", &IntVal{Val: 0x400, Typ: types.Typ_int})
+
+	// Constants — standard file descriptors
+	pkg.define("STDIN", &IntVal{Val: 0, Typ: types.Typ_int})
+	pkg.define("STDOUT", &IntVal{Val: 1, Typ: types.Typ_int})
+	pkg.define("STDERR", &IntVal{Val: 2, Typ: types.Typ_int})
+
+	interp.packages["bootstrap"] = pkg
 }
 
 // Run executes a parsed and type-checked file.
@@ -1140,6 +1163,17 @@ func (interp *Interpreter) evalSlice(e *ast.SliceExpr) Value {
 }
 
 func (interp *Interpreter) evalSelector(e *ast.SelectorExpr) Value {
+	// Package-qualified access: pkg.Name
+	if ident, ok := e.X.(*ast.Ident); ok {
+		if pkg, ok := interp.packages[ident.Name]; ok {
+			val, found := pkg.get(e.Sel.Name)
+			if !found {
+				panic(fmt.Sprintf("package %s has no member %s", ident.Name, e.Sel.Name))
+			}
+			return val
+		}
+	}
+
 	x := interp.evalExpr(e.X)
 
 	// Auto-deref pointers

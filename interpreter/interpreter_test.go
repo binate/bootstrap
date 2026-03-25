@@ -626,9 +626,11 @@ func main() {
 func TestStringConversion(t *testing.T) {
 	src := `package "main"
 
+import "bootstrap"
+
 func main() {
 	x := 42
-	println(string(x))
+	println(bootstrap.string(x))
 }
 `
 	got := runProgram(t, src)
