@@ -808,6 +808,558 @@ func TestParseCompositeLitTrailingComma(t *testing.T) {
 }
 
 // ============================================================
+// Statement Tests
+// ============================================================
+
+func TestParseAssignment(t *testing.T) {
+	p := parse(t, "x = 1")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	as, ok := stmt.(*ast.AssignStmt)
+	if !ok {
+		t.Fatalf("expected *ast.AssignStmt, got %T", stmt)
+	}
+	if as.Op != token.ASSIGN {
+		t.Errorf("expected =, got %s", as.Op)
+	}
+	if len(as.LHS) != 1 || len(as.RHS) != 1 {
+		t.Fatalf("expected 1 LHS and 1 RHS")
+	}
+}
+
+func TestParseCompoundAssignment(t *testing.T) {
+	p := parse(t, "x += 1")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	as, ok := stmt.(*ast.AssignStmt)
+	if !ok {
+		t.Fatalf("expected *ast.AssignStmt, got %T", stmt)
+	}
+	if as.Op != token.ADD_ASSIGN {
+		t.Errorf("expected +=, got %s", as.Op)
+	}
+}
+
+func TestParseMultiAssignment(t *testing.T) {
+	p := parse(t, "x, y = 1, 2")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	as, ok := stmt.(*ast.AssignStmt)
+	if !ok {
+		t.Fatalf("expected *ast.AssignStmt, got %T", stmt)
+	}
+	if len(as.LHS) != 2 || len(as.RHS) != 2 {
+		t.Fatalf("expected 2 LHS and 2 RHS, got %d and %d", len(as.LHS), len(as.RHS))
+	}
+}
+
+func TestParseShortVarDecl(t *testing.T) {
+	p := parse(t, "x := 42")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	svd, ok := stmt.(*ast.ShortVarDecl)
+	if !ok {
+		t.Fatalf("expected *ast.ShortVarDecl, got %T", stmt)
+	}
+	if len(svd.Names) != 1 || svd.Names[0].Name != "x" {
+		t.Errorf("expected x, got %v", svd.Names)
+	}
+}
+
+func TestParseIncDec(t *testing.T) {
+	p := parse(t, "x++")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	id, ok := stmt.(*ast.IncDecStmt)
+	if !ok {
+		t.Fatalf("expected *ast.IncDecStmt, got %T", stmt)
+	}
+	if id.Op != token.INC {
+		t.Errorf("expected ++, got %s", id.Op)
+	}
+}
+
+func TestParseExprStmt(t *testing.T) {
+	p := parse(t, "foo()")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	es, ok := stmt.(*ast.ExprStmt)
+	if !ok {
+		t.Fatalf("expected *ast.ExprStmt, got %T", stmt)
+	}
+	_, ok = es.X.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected *ast.CallExpr, got %T", es.X)
+	}
+}
+
+func TestParseReturnNoValue(t *testing.T) {
+	p := parse(t, "return")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	ret, ok := stmt.(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected *ast.ReturnStmt, got %T", stmt)
+	}
+	if len(ret.Results) != 0 {
+		t.Errorf("expected 0 results, got %d", len(ret.Results))
+	}
+}
+
+func TestParseReturnValue(t *testing.T) {
+	p := parse(t, "return x + 1")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	ret, ok := stmt.(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected *ast.ReturnStmt, got %T", stmt)
+	}
+	if len(ret.Results) != 1 {
+		t.Errorf("expected 1 result, got %d", len(ret.Results))
+	}
+}
+
+func TestParseReturnMultiple(t *testing.T) {
+	p := parse(t, "return x, y")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	ret, ok := stmt.(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected *ast.ReturnStmt, got %T", stmt)
+	}
+	if len(ret.Results) != 2 {
+		t.Errorf("expected 2 results, got %d", len(ret.Results))
+	}
+}
+
+func TestParseBreak(t *testing.T) {
+	p := parse(t, "break")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	_, ok := stmt.(*ast.BreakStmt)
+	if !ok {
+		t.Fatalf("expected *ast.BreakStmt, got %T", stmt)
+	}
+}
+
+func TestParseContinue(t *testing.T) {
+	p := parse(t, "continue")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	_, ok := stmt.(*ast.ContinueStmt)
+	if !ok {
+		t.Fatalf("expected *ast.ContinueStmt, got %T", stmt)
+	}
+}
+
+func TestParseBlock(t *testing.T) {
+	p := parse(t, "{ x := 1; y := 2 }")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	block, ok := stmt.(*ast.Block)
+	if !ok {
+		t.Fatalf("expected *ast.Block, got %T", stmt)
+	}
+	if len(block.Stmts) != 2 {
+		t.Fatalf("expected 2 stmts, got %d", len(block.Stmts))
+	}
+}
+
+func TestParseIfStmt(t *testing.T) {
+	p := parse(t, "if x > 0 { return x }")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	is, ok := stmt.(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected *ast.IfStmt, got %T", stmt)
+	}
+	if is.Else != nil {
+		t.Error("expected no else")
+	}
+}
+
+func TestParseIfElse(t *testing.T) {
+	p := parse(t, "if x > 0 { return x } else { return 0 }")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	is, ok := stmt.(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected *ast.IfStmt, got %T", stmt)
+	}
+	if is.Else == nil {
+		t.Fatal("expected else")
+	}
+	_, ok = is.Else.(*ast.Block)
+	if !ok {
+		t.Fatalf("expected *ast.Block for else, got %T", is.Else)
+	}
+}
+
+func TestParseIfElseIf(t *testing.T) {
+	p := parse(t, "if x > 0 { return 1 } else if x < 0 { return 2 } else { return 0 }")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	is, ok := stmt.(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected *ast.IfStmt, got %T", stmt)
+	}
+	elseIf, ok := is.Else.(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected *ast.IfStmt for else-if, got %T", is.Else)
+	}
+	if elseIf.Else == nil {
+		t.Fatal("expected final else")
+	}
+}
+
+func TestParseForInfinite(t *testing.T) {
+	p := parse(t, "for { break }")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	fs, ok := stmt.(*ast.ForStmt)
+	if !ok {
+		t.Fatalf("expected *ast.ForStmt, got %T", stmt)
+	}
+	if fs.Cond != nil {
+		t.Error("expected nil Cond for infinite loop")
+	}
+	if fs.Init != nil {
+		t.Error("expected nil Init for infinite loop")
+	}
+}
+
+func TestParseForWhile(t *testing.T) {
+	p := parse(t, "for x > 0 { x-- }")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	fs, ok := stmt.(*ast.ForStmt)
+	if !ok {
+		t.Fatalf("expected *ast.ForStmt, got %T", stmt)
+	}
+	if fs.Cond == nil {
+		t.Fatal("expected non-nil Cond")
+	}
+	if fs.Init != nil {
+		t.Error("expected nil Init")
+	}
+}
+
+func TestParseForCStyle(t *testing.T) {
+	p := parse(t, "for i := 0; i < 10; i++ { foo(i) }")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	fs, ok := stmt.(*ast.ForStmt)
+	if !ok {
+		t.Fatalf("expected *ast.ForStmt, got %T", stmt)
+	}
+	if fs.Init == nil {
+		t.Fatal("expected non-nil Init")
+	}
+	if fs.Cond == nil {
+		t.Fatal("expected non-nil Cond")
+	}
+	if fs.Post == nil {
+		t.Fatal("expected non-nil Post")
+	}
+	_, ok = fs.Init.(*ast.ShortVarDecl)
+	if !ok {
+		t.Fatalf("expected *ast.ShortVarDecl for Init, got %T", fs.Init)
+	}
+}
+
+func TestParseForIn(t *testing.T) {
+	p := parse(t, "for x in items { foo(x) }")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	fs, ok := stmt.(*ast.ForStmt)
+	if !ok {
+		t.Fatalf("expected *ast.ForStmt, got %T", stmt)
+	}
+	if fs.Value == nil {
+		t.Fatal("expected non-nil Value")
+	}
+	if fs.Value.Name != "x" {
+		t.Errorf("expected x, got %s", fs.Value.Name)
+	}
+	if fs.Key != nil {
+		t.Error("expected nil Key for single-var for-in")
+	}
+	if fs.Iter == nil {
+		t.Fatal("expected non-nil Iter")
+	}
+}
+
+func TestParseForInTwoVars(t *testing.T) {
+	p := parse(t, "for i, v in items { foo(i, v) }")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	fs, ok := stmt.(*ast.ForStmt)
+	if !ok {
+		t.Fatalf("expected *ast.ForStmt, got %T", stmt)
+	}
+	if fs.Key == nil || fs.Key.Name != "i" {
+		t.Errorf("expected Key=i, got %v", fs.Key)
+	}
+	if fs.Value == nil || fs.Value.Name != "v" {
+		t.Errorf("expected Value=v, got %v", fs.Value)
+	}
+	if fs.Iter == nil {
+		t.Fatal("expected non-nil Iter")
+	}
+}
+
+func TestParseSwitchStmt(t *testing.T) {
+	input := `switch x {
+	case 1:
+		foo()
+	case 2, 3:
+		bar()
+	default:
+		baz()
+	}`
+	p := parse(t, input)
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	sw, ok := stmt.(*ast.SwitchStmt)
+	if !ok {
+		t.Fatalf("expected *ast.SwitchStmt, got %T", stmt)
+	}
+	if sw.Tag == nil {
+		t.Fatal("expected non-nil Tag")
+	}
+	if len(sw.Cases) != 3 {
+		t.Fatalf("expected 3 cases, got %d", len(sw.Cases))
+	}
+	// case 1
+	if len(sw.Cases[0].Exprs) != 1 {
+		t.Errorf("case 0: expected 1 expr, got %d", len(sw.Cases[0].Exprs))
+	}
+	// case 2, 3
+	if len(sw.Cases[1].Exprs) != 2 {
+		t.Errorf("case 1: expected 2 exprs, got %d", len(sw.Cases[1].Exprs))
+	}
+	// default
+	if sw.Cases[2].Exprs != nil {
+		t.Error("default case should have nil Exprs")
+	}
+}
+
+func TestParseVarDecl(t *testing.T) {
+	p := parse(t, "var x int")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	vd, ok := stmt.(*ast.VarDecl)
+	if !ok {
+		t.Fatalf("expected *ast.VarDecl, got %T", stmt)
+	}
+	if vd.Name.Name != "x" {
+		t.Errorf("expected x, got %s", vd.Name.Name)
+	}
+	if vd.Type == nil {
+		t.Fatal("expected non-nil Type")
+	}
+}
+
+func TestParseVarDeclInferred(t *testing.T) {
+	p := parse(t, "var x = 42")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	vd, ok := stmt.(*ast.VarDecl)
+	if !ok {
+		t.Fatalf("expected *ast.VarDecl, got %T", stmt)
+	}
+	if vd.Type != nil {
+		t.Error("expected nil Type for inferred var")
+	}
+	if vd.Value == nil {
+		t.Fatal("expected non-nil Value")
+	}
+}
+
+func TestParseVarDeclWithInit(t *testing.T) {
+	p := parse(t, "var x int = 42")
+	stmt := p.ParseStmt()
+	noErrors(t, p)
+	vd, ok := stmt.(*ast.VarDecl)
+	if !ok {
+		t.Fatalf("expected *ast.VarDecl, got %T", stmt)
+	}
+	if vd.Type == nil {
+		t.Fatal("expected non-nil Type")
+	}
+	if vd.Value == nil {
+		t.Fatal("expected non-nil Value")
+	}
+}
+
+// ============================================================
+// File-Level Tests
+// ============================================================
+
+func TestParseFile(t *testing.T) {
+	input := `package "main"
+
+import "fmt"
+
+func add(a int, b int) int {
+	return a + b
+}
+
+var x int = 10
+
+type Point struct {
+	x int
+	y int
+}
+
+const maxSize = 100
+`
+	p := parse(t, input)
+	f := p.ParseFile()
+	noErrors(t, p)
+
+	if f.PkgName == nil || f.PkgName.Value != `"main"` {
+		t.Errorf("expected package \"main\", got %v", f.PkgName)
+	}
+	if len(f.Imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(f.Imports))
+	}
+	if len(f.Decls) != 4 {
+		t.Fatalf("expected 4 decls, got %d", len(f.Decls))
+	}
+	// func
+	_, ok := f.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Errorf("expected FuncDecl, got %T", f.Decls[0])
+	}
+	// var
+	_, ok = f.Decls[1].(*ast.VarDecl)
+	if !ok {
+		t.Errorf("expected VarDecl, got %T", f.Decls[1])
+	}
+	// type
+	_, ok = f.Decls[2].(*ast.TypeDecl)
+	if !ok {
+		t.Errorf("expected TypeDecl, got %T", f.Decls[2])
+	}
+	// const
+	_, ok = f.Decls[3].(*ast.ConstDecl)
+	if !ok {
+		t.Errorf("expected ConstDecl, got %T", f.Decls[3])
+	}
+}
+
+func TestParseGroupedImports(t *testing.T) {
+	input := `package "main"
+
+import (
+	"fmt"
+	io "io/ioutil"
+)
+`
+	p := parse(t, input)
+	f := p.ParseFile()
+	noErrors(t, p)
+
+	if len(f.Imports) != 2 {
+		t.Fatalf("expected 2 imports, got %d", len(f.Imports))
+	}
+	if f.Imports[0].Alias != "" {
+		t.Errorf("expected no alias for first import")
+	}
+	if f.Imports[1].Alias != "io" {
+		t.Errorf("expected alias 'io', got %q", f.Imports[1].Alias)
+	}
+}
+
+func TestParseFuncMultipleReturns(t *testing.T) {
+	input := `package "main"
+
+func divide(a int, b int) (int, bool) {
+	if b == 0 {
+		return 0, false
+	}
+	return a / b, true
+}
+`
+	p := parse(t, input)
+	f := p.ParseFile()
+	noErrors(t, p)
+
+	if len(f.Decls) != 1 {
+		t.Fatalf("expected 1 decl, got %d", len(f.Decls))
+	}
+	fd, ok := f.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected FuncDecl, got %T", f.Decls[0])
+	}
+	if len(fd.Results) != 2 {
+		t.Fatalf("expected 2 return types, got %d", len(fd.Results))
+	}
+}
+
+func TestParseGroupedConst(t *testing.T) {
+	input := `package "main"
+
+const (
+	a = 1
+	b = 2
+	c = 3
+)
+`
+	p := parse(t, input)
+	f := p.ParseFile()
+	noErrors(t, p)
+
+	if len(f.Decls) != 1 {
+		t.Fatalf("expected 1 decl (GroupDecl), got %d", len(f.Decls))
+	}
+	gd, ok := f.Decls[0].(*ast.GroupDecl)
+	if !ok {
+		t.Fatalf("expected *ast.GroupDecl, got %T", f.Decls[0])
+	}
+	if len(gd.Decls) != 3 {
+		t.Fatalf("expected 3 const specs, got %d", len(gd.Decls))
+	}
+}
+
+func TestParseTypeAlias(t *testing.T) {
+	input := `package "main"
+
+type MyInt = int
+`
+	p := parse(t, input)
+	f := p.ParseFile()
+	noErrors(t, p)
+
+	td, ok := f.Decls[0].(*ast.TypeDecl)
+	if !ok {
+		t.Fatalf("expected TypeDecl, got %T", f.Decls[0])
+	}
+	if !td.Assign {
+		t.Error("expected Assign=true for type alias")
+	}
+}
+
+func TestParseDistinctType(t *testing.T) {
+	input := `package "main"
+
+type Duration int64
+`
+	p := parse(t, input)
+	f := p.ParseFile()
+	noErrors(t, p)
+
+	td, ok := f.Decls[0].(*ast.TypeDecl)
+	if !ok {
+		t.Fatalf("expected TypeDecl, got %T", f.Decls[0])
+	}
+	if td.Assign {
+		t.Error("expected Assign=false for distinct type")
+	}
+}
+
+// ============================================================
 // Helpers
 // ============================================================
 

@@ -15,6 +15,11 @@ type Parser struct {
 	tok  token.Token // current token
 	prev token.Token // previous token (for error reporting)
 	errs []Error
+
+	// noCompositeLit suppresses composite literal parsing (D4).
+	// Set when parsing conditions in if/for/switch where { would be
+	// ambiguous with the block body.
+	noCompositeLit bool
 }
 
 // Error represents a parse error with position.
@@ -220,6 +225,16 @@ func (p *Parser) ParseExpr() ast.Expr {
 
 func (p *Parser) parseExpr() ast.Expr {
 	return p.parseOrExpr()
+}
+
+// parseExprNoCompositeLit parses an expression with composite literals suppressed.
+// Used in if/for/switch conditions where { is ambiguous with the block body (D4).
+func (p *Parser) parseExprNoCompositeLit() ast.Expr {
+	old := p.noCompositeLit
+	p.noCompositeLit = true
+	x := p.parseExpr()
+	p.noCompositeLit = old
+	return x
 }
 
 func (p *Parser) parseOrExpr() ast.Expr {
@@ -465,7 +480,7 @@ func (p *Parser) parseIdentOrCompositeLit() ast.Expr {
 	if p.tok.Type == token.DOT {
 		p.next()
 		name := p.parseIdent()
-		if p.tok.Type == token.LBRACE {
+		if p.tok.Type == token.LBRACE && !p.noCompositeLit {
 			// pkg.Type{ ... } — composite literal
 			return p.parseCompositeLitBody(&ast.NamedType{Pkg: ident, Name: name})
 		}
@@ -476,7 +491,7 @@ func (p *Parser) parseIdentOrCompositeLit() ast.Expr {
 	}
 
 	// Check for composite literal: Type{ ... }
-	if p.tok.Type == token.LBRACE {
+	if p.tok.Type == token.LBRACE && !p.noCompositeLit {
 		return p.parseCompositeLitBody(&ast.NamedType{Name: ident})
 	}
 
@@ -618,6 +633,711 @@ func (p *Parser) parseLenCall() *ast.BuiltinCall {
 	arg := p.parseExpr()
 	p.expect(token.RPAREN)
 	return &ast.BuiltinCall{BuiltinPos: pos, Builtin: token.LEN, Args: []ast.Expr{arg}}
+}
+
+// ============================================================
+// Source File Parsing
+// ============================================================
+
+// ParseFile parses a complete source file.
+func (p *Parser) ParseFile() *ast.File {
+	f := &ast.File{}
+
+	// Package clause
+	f.Package = p.tok.Pos
+	p.expect(token.PACKAGE)
+	if p.tok.Type == token.STRING {
+		f.PkgName = &ast.StringLit{ValuePos: p.tok.Pos, Value: p.tok.Literal}
+		p.next()
+	} else {
+		p.errorf("expected package name string, got %s", p.tok.Type)
+	}
+	p.expect(token.SEMICOLON)
+
+	// Import declarations
+	for p.tok.Type == token.IMPORT {
+		f.Imports = append(f.Imports, p.parseImportDecl()...)
+		p.expect(token.SEMICOLON)
+	}
+
+	// Top-level declarations
+	for p.tok.Type != token.EOF {
+		d := p.parseTopLevelDecl()
+		if d != nil {
+			f.Decls = append(f.Decls, d)
+		}
+		if p.tok.Type != token.EOF {
+			p.expect(token.SEMICOLON)
+		}
+	}
+
+	return f
+}
+
+func (p *Parser) parseImportDecl() []*ast.ImportSpec {
+	pos := p.tok.Pos
+	p.expect(token.IMPORT)
+
+	if p.tok.Type == token.LPAREN {
+		// Grouped import
+		p.next()
+		var specs []*ast.ImportSpec
+		for p.tok.Type != token.RPAREN && p.tok.Type != token.EOF {
+			specs = append(specs, p.parseImportSpec(pos))
+			if !p.got(token.SEMICOLON) {
+				break
+			}
+		}
+		p.expect(token.RPAREN)
+		return specs
+	}
+
+	return []*ast.ImportSpec{p.parseImportSpec(pos)}
+}
+
+func (p *Parser) parseImportSpec(importPos token.Pos) *ast.ImportSpec {
+	spec := &ast.ImportSpec{ImportPos: importPos}
+	if p.tok.Type == token.IDENT {
+		spec.Alias = p.tok.Literal
+		p.next()
+	}
+	if p.tok.Type == token.STRING {
+		spec.Path = &ast.StringLit{ValuePos: p.tok.Pos, Value: p.tok.Literal}
+		p.next()
+	} else {
+		p.errorf("expected import path string, got %s", p.tok.Type)
+	}
+	return spec
+}
+
+func (p *Parser) parseTopLevelDecl() ast.Decl {
+	switch p.tok.Type {
+	case token.FUNC:
+		return p.parseFuncDecl()
+	case token.TYPE:
+		return p.parseTypeDecl()
+	case token.VAR:
+		return p.parseVarDecl()
+	case token.CONST:
+		return p.parseConstDecl()
+	default:
+		p.errorf("expected declaration, got %s", p.tok.Type)
+		p.next()
+		return nil
+	}
+}
+
+// ============================================================
+// Declaration Parsing
+// ============================================================
+
+func (p *Parser) parseFuncDecl() *ast.FuncDecl {
+	pos := p.tok.Pos
+	p.expect(token.FUNC)
+	name := p.parseIdent()
+
+	// Parameters
+	p.expect(token.LPAREN)
+	var params []*ast.ParamDecl
+	if p.tok.Type != token.RPAREN {
+		params = p.parseParamList()
+	}
+	p.expect(token.RPAREN)
+
+	// Result types
+	var results []ast.TypeExpr
+	if p.tok.Type == token.LPAREN {
+		// Multiple returns: (T1, T2)
+		p.next()
+		results = p.parseTypeList()
+		p.expect(token.RPAREN)
+	} else if p.tok.Type != token.LBRACE {
+		// Single return type
+		results = append(results, p.parseType())
+	}
+
+	body := p.parseBlock()
+	return &ast.FuncDecl{
+		FuncPos: pos,
+		Name:    name,
+		Params:  params,
+		Results: results,
+		Body:    body,
+	}
+}
+
+func (p *Parser) parseParamList() []*ast.ParamDecl {
+	var params []*ast.ParamDecl
+	params = append(params, p.parseParamDecl())
+	for p.got(token.COMMA) {
+		if p.tok.Type == token.RPAREN {
+			break // trailing comma
+		}
+		params = append(params, p.parseParamDecl())
+	}
+	return params
+}
+
+func (p *Parser) parseParamDecl() *ast.ParamDecl {
+	name := p.parseIdent()
+	typ := p.parseType()
+	return &ast.ParamDecl{Name: name, Type: typ}
+}
+
+func (p *Parser) parseTypeList() []ast.TypeExpr {
+	var list []ast.TypeExpr
+	list = append(list, p.parseType())
+	for p.got(token.COMMA) {
+		list = append(list, p.parseType())
+	}
+	return list
+}
+
+func (p *Parser) parseTypeDecl() ast.Decl {
+	pos := p.tok.Pos
+	p.expect(token.TYPE)
+
+	if p.tok.Type == token.LPAREN {
+		// Grouped type declarations — return only the first for now;
+		// we'll wrap them in a list if needed. For simplicity, parse
+		// each as a separate decl and return via a GroupDecl wrapper.
+		// Actually, let's just parse the first spec for now.
+		// TODO: handle grouped type declarations properly
+		p.next()
+		var decls []ast.Decl
+		for p.tok.Type != token.RPAREN && p.tok.Type != token.EOF {
+			name := p.parseIdent()
+			decls = append(decls, p.parseTypeSpec(pos, name))
+			if !p.got(token.SEMICOLON) {
+				break
+			}
+		}
+		p.expect(token.RPAREN)
+		if len(decls) == 1 {
+			return decls[0]
+		}
+		return &ast.GroupDecl{Decls: decls}
+	}
+
+	name := p.parseIdent()
+	return p.parseTypeSpec(pos, name)
+}
+
+func (p *Parser) parseTypeSpec(typePos token.Pos, name *ast.Ident) *ast.TypeDecl {
+	d := &ast.TypeDecl{TypePos: typePos, Name: name}
+	if p.tok.Type == token.ASSIGN {
+		// Type alias: type X = T
+		p.next()
+		d.Assign = true
+		d.Type = p.parseType()
+	} else if p.tok.Type == token.STRUCT {
+		// Named struct: type X struct { ... }
+		d.Type = p.parseStructType()
+	} else {
+		// Distinct type: type X T
+		d.Type = p.parseType()
+	}
+	return d
+}
+
+func (p *Parser) parseVarDecl() ast.Decl {
+	pos := p.tok.Pos
+	p.expect(token.VAR)
+
+	if p.tok.Type == token.LPAREN {
+		// Grouped var declarations
+		p.next()
+		var decls []ast.Decl
+		for p.tok.Type != token.RPAREN && p.tok.Type != token.EOF {
+			decls = append(decls, p.parseVarSpec(pos))
+			if !p.got(token.SEMICOLON) {
+				break
+			}
+		}
+		p.expect(token.RPAREN)
+		if len(decls) == 1 {
+			return decls[0]
+		}
+		return &ast.GroupDecl{Decls: decls}
+	}
+
+	return p.parseVarSpec(pos)
+}
+
+func (p *Parser) parseVarSpec(varPos token.Pos) *ast.VarDecl {
+	name := p.parseIdent()
+	d := &ast.VarDecl{VarPos: varPos, Name: name}
+
+	if p.tok.Type == token.ASSIGN {
+		// var x = expr (type inferred)
+		p.next()
+		d.Value = p.parseExpr()
+	} else {
+		// var x T or var x T = expr
+		d.Type = p.parseType()
+		if p.got(token.ASSIGN) {
+			d.Value = p.parseExpr()
+		}
+	}
+	return d
+}
+
+func (p *Parser) parseConstDecl() ast.Decl {
+	pos := p.tok.Pos
+	p.expect(token.CONST)
+
+	if p.tok.Type == token.LPAREN {
+		// Grouped const
+		p.next()
+		var decls []ast.Decl
+		for p.tok.Type != token.RPAREN && p.tok.Type != token.EOF {
+			decls = append(decls, p.parseConstSpec(pos))
+			if !p.got(token.SEMICOLON) {
+				break
+			}
+		}
+		p.expect(token.RPAREN)
+		if len(decls) == 1 {
+			return decls[0]
+		}
+		return &ast.GroupDecl{Decls: decls}
+	}
+
+	return p.parseConstSpec(pos)
+}
+
+func (p *Parser) parseConstSpec(constPos token.Pos) *ast.ConstDecl {
+	name := p.parseIdent()
+	d := &ast.ConstDecl{ConstPos: constPos, Name: name}
+
+	if p.tok.Type == token.ASSIGN {
+		// const x = expr
+		p.next()
+		d.Value = p.parseExpr()
+	} else if p.tok.Type != token.SEMICOLON && p.tok.Type != token.RPAREN {
+		// const x T = expr or just const x (repeat) — check for type
+		if p.tok.Type != token.ASSIGN {
+			// Could be type or could be "=" — try type first
+			d.Type = p.parseType()
+		}
+		if p.got(token.ASSIGN) {
+			d.Value = p.parseExpr()
+		}
+		// If no type and no value, it's a bare name (repeat previous)
+	}
+	return d
+}
+
+// ============================================================
+// Statement Parsing
+// ============================================================
+
+// ParseStmt parses a single statement.
+func (p *Parser) ParseStmt() ast.Stmt {
+	return p.parseStmt()
+}
+
+func (p *Parser) parseStmt() ast.Stmt {
+	switch p.tok.Type {
+	case token.LBRACE:
+		return p.parseBlock()
+	case token.IF:
+		return p.parseIfStmt()
+	case token.FOR:
+		return p.parseForStmt()
+	case token.SWITCH:
+		return p.parseSwitchStmt()
+	case token.RETURN:
+		return p.parseReturnStmt()
+	case token.BREAK:
+		pos := p.tok.Pos
+		p.next()
+		return &ast.BreakStmt{BreakPos: pos}
+	case token.CONTINUE:
+		pos := p.tok.Pos
+		p.next()
+		return &ast.ContinueStmt{ContinuePos: pos}
+	case token.VAR:
+		return p.parseVarDecl().(*ast.VarDecl)
+	case token.CONST:
+		return p.parseConstDecl().(*ast.ConstDecl)
+	case token.TYPE:
+		return p.parseTypeDecl().(*ast.TypeDecl)
+	default:
+		return p.parseSimpleStmt()
+	}
+}
+
+func (p *Parser) parseBlock() *ast.Block {
+	lbrace := p.tok.Pos
+	p.expect(token.LBRACE)
+	var stmts []ast.Stmt
+	for p.tok.Type != token.RBRACE && p.tok.Type != token.EOF {
+		stmts = append(stmts, p.parseStmt())
+		if !p.got(token.SEMICOLON) {
+			if p.tok.Type != token.RBRACE && p.tok.Type != token.EOF {
+				p.errorf("expected ; or }, got %s", p.tok.Type)
+				p.next()
+			}
+		}
+	}
+	rbrace := p.tok.Pos
+	p.expect(token.RBRACE)
+	return &ast.Block{Lbrace: lbrace, Stmts: stmts, Rbrace: rbrace}
+}
+
+// parseSimpleStmt handles: expression statement, assignment, short var decl, inc/dec.
+// D1: Parse LHS as expression list, then check operator to decide.
+func (p *Parser) parseSimpleStmt() ast.Stmt {
+	if p.tok.Type == token.SEMICOLON || p.tok.Type == token.RBRACE {
+		return &ast.EmptyStmt{SemiPos: p.tok.Pos}
+	}
+
+	exprs := p.parseExprList()
+
+	switch p.tok.Type {
+	case token.DEFINE:
+		// Short var decl: x, y := expr, expr
+		op := p.tok.Pos
+		p.next()
+		rhs := p.parseExprList()
+		names := make([]*ast.Ident, len(exprs))
+		for i, e := range exprs {
+			ident, ok := e.(*ast.Ident)
+			if !ok {
+				p.errorf("expected identifier on left side of :=")
+				names[i] = &ast.Ident{NamePos: e.Pos(), Name: "<error>"}
+			} else {
+				names[i] = ident
+			}
+		}
+		return &ast.ShortVarDecl{Names: names, Op: op, RHS: rhs}
+
+	case token.ASSIGN:
+		p.next()
+		rhs := p.parseExprList()
+		return &ast.AssignStmt{LHS: exprs, Op: token.ASSIGN, RHS: rhs}
+
+	case token.ADD_ASSIGN, token.SUB_ASSIGN, token.MUL_ASSIGN, token.QUO_ASSIGN,
+		token.REM_ASSIGN, token.AND_ASSIGN, token.OR_ASSIGN, token.XOR_ASSIGN,
+		token.SHL_ASSIGN, token.SHR_ASSIGN:
+		op := p.tok.Type
+		p.next()
+		rhs := p.parseExpr()
+		return &ast.AssignStmt{LHS: exprs, Op: op, RHS: []ast.Expr{rhs}}
+
+	case token.INC:
+		p.next()
+		return &ast.IncDecStmt{X: exprs[0], Op: token.INC}
+
+	case token.DEC:
+		p.next()
+		return &ast.IncDecStmt{X: exprs[0], Op: token.DEC}
+	}
+
+	// Expression statement
+	if len(exprs) == 1 {
+		return &ast.ExprStmt{X: exprs[0]}
+	}
+	// Multiple expressions without an operator — error
+	p.errorf("expected assignment or declaration")
+	return &ast.ExprStmt{X: exprs[0]}
+}
+
+func (p *Parser) parseReturnStmt() *ast.ReturnStmt {
+	pos := p.tok.Pos
+	p.next() // consume return
+
+	var results []ast.Expr
+	// Return may have no values. If the next token is on the same
+	// logical line (i.e., not a semicolon), parse expression list.
+	if p.tok.Type != token.SEMICOLON && p.tok.Type != token.RBRACE && p.tok.Type != token.EOF {
+		results = p.parseExprList()
+	}
+	return &ast.ReturnStmt{ReturnPos: pos, Results: results}
+}
+
+func (p *Parser) parseIfStmt() *ast.IfStmt {
+	pos := p.tok.Pos
+	p.expect(token.IF)
+	cond := p.parseExprNoCompositeLit()
+	body := p.parseBlock()
+
+	var elseStmt ast.Stmt
+	if p.got(token.ELSE) {
+		if p.tok.Type == token.IF {
+			elseStmt = p.parseIfStmt()
+		} else {
+			elseStmt = p.parseBlock()
+		}
+	}
+	return &ast.IfStmt{IfPos: pos, Cond: cond, Body: body, Else: elseStmt}
+}
+
+// parseForStmt handles all for-loop variants via D2 disambiguation.
+func (p *Parser) parseForStmt() *ast.ForStmt {
+	pos := p.tok.Pos
+	p.expect(token.FOR)
+
+	// Suppress composite literals in for header (D4 — { is ambiguous with block)
+	oldNCL := p.noCompositeLit
+	p.noCompositeLit = true
+	defer func() { p.noCompositeLit = oldNCL }()
+
+	// Infinite loop: for { }
+	if p.tok.Type == token.LBRACE {
+		body := p.parseBlock()
+		return &ast.ForStmt{ForPos: pos, Body: body}
+	}
+
+	// Check for for-in: for ident in expr { }  or  for ident, ident in expr { }
+	// "in" is a keyword so it can't appear as a normal expression.
+	if p.tok.Type == token.IDENT {
+		first := p.parseIdent()
+		if p.tok.Type == token.IN {
+			// Single variable for-in: for x in collection { }
+			p.next() // consume "in"
+			iter := p.parseExprNoCompositeLit()
+			body := p.parseBlock()
+			return &ast.ForStmt{ForPos: pos, Value: first, Iter: iter, Body: body}
+		}
+		if p.tok.Type == token.COMMA {
+			p.next() // consume ","
+			if p.tok.Type == token.IDENT {
+				second := p.parseIdent()
+				if p.tok.Type == token.IN {
+					// Two variable for-in: for i, v in collection { }
+					p.next() // consume "in"
+					iter := p.parseExprNoCompositeLit()
+					body := p.parseBlock()
+					return &ast.ForStmt{ForPos: pos, Key: first, Value: second, Iter: iter, Body: body}
+				}
+				// Not for-in. We consumed "ident, ident" — reconstruct as expression.
+				// This is: first , second <op> ...
+				// It must be an expression list for assignment or short var decl.
+				return p.finishForCStyle(pos, first, second)
+			}
+		}
+		// Not for-in. We have a single identifier. Continue parsing as expression.
+		return p.finishForAfterIdent(pos, first)
+	}
+
+	// Not starting with identifier — parse as simple statement.
+	first := p.parseSimpleStmt()
+	return p.finishForWithStmt(pos, first)
+}
+
+// finishForAfterIdent continues parsing a for statement after consuming one identifier.
+// The identifier was not followed by "in" or ",".
+func (p *Parser) finishForAfterIdent(forPos token.Pos, ident *ast.Ident) *ast.ForStmt {
+	// Continue parsing the rest of the expression using ident as the start.
+	// The identifier is a primary expression; apply postfix and binary operators.
+	x := p.continuePostfix(ident)
+	x = p.continueBinaryExpr(x, 1)
+
+	// Now we have the first expression. Check what follows.
+	first := p.finishSimpleStmt([]ast.Expr{x})
+	return p.finishForWithStmt(forPos, first)
+}
+
+// finishForCStyle handles the case where we consumed "ident, ident" in a for header
+// but it wasn't followed by "in". So it's a multi-assignment or short var decl
+// as the init of a C-style for loop.
+func (p *Parser) finishForCStyle(forPos token.Pos, first, second *ast.Ident) *ast.ForStmt {
+	// We have two identifiers with a comma. This should be the start
+	// of a short var decl or assignment: x, y := ... or x, y = ...
+	exprs := []ast.Expr{first, second}
+	for p.got(token.COMMA) {
+		exprs = append(exprs, p.parseExpr())
+	}
+	init := p.finishSimpleStmt(exprs)
+	return p.finishForWithStmt(forPos, init)
+}
+
+// finishForWithStmt continues parsing a for statement given the first statement.
+func (p *Parser) finishForWithStmt(forPos token.Pos, first ast.Stmt) *ast.ForStmt {
+	if p.tok.Type == token.LBRACE {
+		// While-style: for cond { }
+		cond := p.stmtToExpr(first)
+		body := p.parseBlock()
+		return &ast.ForStmt{ForPos: forPos, Cond: cond, Body: body}
+	}
+
+	// C-style: for init; cond; post { }
+	p.expect(token.SEMICOLON)
+	var cond ast.Expr
+	if p.tok.Type != token.SEMICOLON {
+		cond = p.parseExpr()
+	}
+	p.expect(token.SEMICOLON)
+	var post ast.Stmt
+	if p.tok.Type != token.LBRACE {
+		post = p.parseSimpleStmt()
+	}
+	body := p.parseBlock()
+	return &ast.ForStmt{ForPos: forPos, Init: first, Cond: cond, Post: post, Body: body}
+}
+
+// continuePostfix applies postfix operations to an already-parsed expression.
+func (p *Parser) continuePostfix(x ast.Expr) ast.Expr {
+	for {
+		switch p.tok.Type {
+		case token.DOT:
+			p.next()
+			sel := p.parseIdent()
+			x = &ast.SelectorExpr{X: x, Sel: sel}
+		case token.LBRACKET:
+			x = p.parseIndexOrSlice(x)
+		case token.LPAREN:
+			x = p.parseCallExpr(x)
+		default:
+			return x
+		}
+	}
+}
+
+// continueBinaryExpr continues parsing binary expression after a primary/postfix expr.
+// minPrec is the minimum precedence level (1 = lowest = ||).
+func (p *Parser) continueBinaryExpr(x ast.Expr, minPrec int) ast.Expr {
+	for {
+		prec := p.binaryPrec(p.tok.Type)
+		if prec < minPrec {
+			return x
+		}
+		op := p.tok.Type
+		p.next()
+		y := p.parseUnaryExpr()
+		// Check for higher-precedence operators on the right
+		for {
+			nextPrec := p.binaryPrec(p.tok.Type)
+			if nextPrec <= prec {
+				break
+			}
+			y = p.continueBinaryExpr(y, nextPrec)
+		}
+		x = &ast.BinaryExpr{X: x, Op: op, Y: y}
+	}
+}
+
+// binaryPrec returns the precedence of a binary operator (0 if not a binary op).
+func (p *Parser) binaryPrec(op token.Type) int {
+	switch op {
+	case token.LOR:
+		return 1
+	case token.LAND:
+		return 2
+	case token.EQ, token.NEQ, token.LT, token.GT, token.LEQ, token.GEQ:
+		return 3
+	case token.PIPE:
+		return 4
+	case token.CARET:
+		return 5
+	case token.AMP:
+		return 6
+	case token.SHL, token.SHR:
+		return 7
+	case token.PLUS, token.MINUS:
+		return 8
+	case token.STAR, token.SLASH, token.PERCENT:
+		return 9
+	}
+	return 0
+}
+
+// finishSimpleStmt completes a simple statement given an already-parsed expression list.
+func (p *Parser) finishSimpleStmt(exprs []ast.Expr) ast.Stmt {
+	switch p.tok.Type {
+	case token.DEFINE:
+		op := p.tok.Pos
+		p.next()
+		rhs := p.parseExprList()
+		names := make([]*ast.Ident, len(exprs))
+		for i, e := range exprs {
+			ident, ok := e.(*ast.Ident)
+			if !ok {
+				p.errorf("expected identifier on left side of :=")
+				names[i] = &ast.Ident{NamePos: e.Pos(), Name: "<error>"}
+			} else {
+				names[i] = ident
+			}
+		}
+		return &ast.ShortVarDecl{Names: names, Op: op, RHS: rhs}
+
+	case token.ASSIGN:
+		p.next()
+		rhs := p.parseExprList()
+		return &ast.AssignStmt{LHS: exprs, Op: token.ASSIGN, RHS: rhs}
+
+	case token.ADD_ASSIGN, token.SUB_ASSIGN, token.MUL_ASSIGN, token.QUO_ASSIGN,
+		token.REM_ASSIGN, token.AND_ASSIGN, token.OR_ASSIGN, token.XOR_ASSIGN,
+		token.SHL_ASSIGN, token.SHR_ASSIGN:
+		op := p.tok.Type
+		p.next()
+		rhs := p.parseExpr()
+		return &ast.AssignStmt{LHS: exprs, Op: op, RHS: []ast.Expr{rhs}}
+
+	case token.INC:
+		p.next()
+		return &ast.IncDecStmt{X: exprs[0], Op: token.INC}
+
+	case token.DEC:
+		p.next()
+		return &ast.IncDecStmt{X: exprs[0], Op: token.DEC}
+	}
+
+	if len(exprs) == 1 {
+		return &ast.ExprStmt{X: exprs[0]}
+	}
+	p.errorf("expected assignment or declaration")
+	return &ast.ExprStmt{X: exprs[0]}
+}
+
+// stmtToExpr extracts an expression from an ExprStmt.
+func (p *Parser) stmtToExpr(s ast.Stmt) ast.Expr {
+	if es, ok := s.(*ast.ExprStmt); ok {
+		return es.X
+	}
+	p.errorf("expected expression")
+	return &ast.Ident{NamePos: s.Pos(), Name: "<error>"}
+}
+
+func (p *Parser) parseSwitchStmt() *ast.SwitchStmt {
+	pos := p.tok.Pos
+	p.expect(token.SWITCH)
+
+	var tag ast.Expr
+	if p.tok.Type != token.LBRACE {
+		tag = p.parseExprNoCompositeLit()
+	}
+
+	p.expect(token.LBRACE)
+	var cases []*ast.CaseClause
+	for p.tok.Type != token.RBRACE && p.tok.Type != token.EOF {
+		cases = append(cases, p.parseCaseClause())
+	}
+	p.expect(token.RBRACE)
+
+	return &ast.SwitchStmt{SwitchPos: pos, Tag: tag, Cases: cases}
+}
+
+func (p *Parser) parseCaseClause() *ast.CaseClause {
+	cc := &ast.CaseClause{CasePos: p.tok.Pos}
+	if p.tok.Type == token.CASE {
+		p.next()
+		cc.Exprs = p.parseExprList()
+	} else {
+		p.expect(token.DEFAULT)
+	}
+	p.expect(token.COLON)
+
+	for p.tok.Type != token.CASE && p.tok.Type != token.DEFAULT &&
+		p.tok.Type != token.RBRACE && p.tok.Type != token.EOF {
+		cc.Body = append(cc.Body, p.parseStmt())
+		if !p.got(token.SEMICOLON) {
+			break
+		}
+	}
+	return cc
 }
 
 // ============================================================

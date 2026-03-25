@@ -123,6 +123,21 @@ func (d *TypeDecl) node()          {}
 func (d *TypeDecl) decl()          {}
 func (d *TypeDecl) stmt()          {}
 
+// GroupDecl represents a grouped declaration: type ( ... ), var ( ... ), const ( ... ).
+type GroupDecl struct {
+	Decls []Decl
+}
+
+func (d *GroupDecl) Pos() token.Pos {
+	if len(d.Decls) > 0 {
+		return d.Decls[0].Pos()
+	}
+	return token.Pos{}
+}
+func (d *GroupDecl) node() {}
+func (d *GroupDecl) decl() {}
+func (d *GroupDecl) stmt() {}
+
 // ============================================================
 // Statements
 // ============================================================
