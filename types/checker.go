@@ -14,7 +14,7 @@ type Checker struct {
 	file     *ast.File
 	errors   []CheckError
 	scope    *Scope
-	funcRet  []Type // expected return types of current function
+	funcRet  []Type            // expected return types of current function
 	packages map[string]*Scope // imported package scopes
 }
 
@@ -40,7 +40,7 @@ type Symbol struct {
 type SymbolKind int
 
 const (
-	VarSym   SymbolKind = iota
+	VarSym SymbolKind = iota
 	ConstSym
 	TypeSym
 	FuncSym

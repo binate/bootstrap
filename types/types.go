@@ -23,9 +23,9 @@ type IntType struct {
 	Name   string
 }
 
-func (t *IntType) String() string     { return t.Name }
-func (t *IntType) Underlying() Type   { return t }
-func (t *IntType) typeNode()          {}
+func (t *IntType) String() string   { return t.Name }
+func (t *IntType) Underlying() Type { return t }
+func (t *IntType) typeNode()        {}
 
 // BoolType represents the bool type.
 type BoolType struct{}
@@ -199,13 +199,13 @@ func (t *FuncType) typeNode()        {}
 
 // NamedType represents a distinct named type (type Duration int64).
 type NamedType struct {
-	Name       string
+	Name        string
 	Underlying_ Type // the underlying type
 }
 
-func (t *NamedType) String() string     { return t.Name }
-func (t *NamedType) Underlying() Type   { return t.Underlying_ }
-func (t *NamedType) typeNode()          {}
+func (t *NamedType) String() string   { return t.Name }
+func (t *NamedType) Underlying() Type { return t.Underlying_ }
+func (t *NamedType) typeNode()        {}
 
 // AliasType represents a type alias (type MyInt = int).
 type AliasType struct {
@@ -225,11 +225,11 @@ var (
 	Typ_bool = &BoolType{}
 	Typ_char = &CharType{}
 
-	Typ_int    = &IntType{Width: 64, Signed: true, Name: "int"}
-	Typ_int8   = &IntType{Width: 8, Signed: true, Name: "int8"}
-	Typ_int16  = &IntType{Width: 16, Signed: true, Name: "int16"}
-	Typ_int32  = &IntType{Width: 32, Signed: true, Name: "int32"}
-	Typ_int64  = &IntType{Width: 64, Signed: true, Name: "int64"}
+	Typ_int   = &IntType{Width: 64, Signed: true, Name: "int"}
+	Typ_int8  = &IntType{Width: 8, Signed: true, Name: "int8"}
+	Typ_int16 = &IntType{Width: 16, Signed: true, Name: "int16"}
+	Typ_int32 = &IntType{Width: 32, Signed: true, Name: "int32"}
+	Typ_int64 = &IntType{Width: 64, Signed: true, Name: "int64"}
 
 	Typ_uint   = &IntType{Width: 64, Signed: false, Name: "uint"}
 	Typ_uint8  = &IntType{Width: 8, Signed: false, Name: "uint8"}

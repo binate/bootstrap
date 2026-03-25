@@ -13,13 +13,13 @@ import (
 
 // Interpreter evaluates a Binate AST.
 type Interpreter struct {
-	env      *Env
-	funcs    map[string]*ast.FuncDecl
-	types    map[string]types.Type
-	stdout   *strings.Builder // captured output (nil = write to os.Stdout)
-	files    map[int]*os.File // open file descriptors
-	nextFD   int              // next file descriptor to allocate
-	packages     map[string]*Env    // package path -> env
+	env           *Env
+	funcs         map[string]*ast.FuncDecl
+	types         map[string]types.Type
+	stdout        *strings.Builder  // captured output (nil = write to os.Stdout)
+	files         map[int]*os.File  // open file descriptors
+	nextFD        int               // next file descriptor to allocate
+	packages      map[string]*Env   // package path -> env
 	importAliases map[string]string // local name -> package path
 }
 
@@ -83,10 +83,10 @@ type signalContinue struct{}
 // New creates a new interpreter.
 func New() *Interpreter {
 	interp := &Interpreter{
-		funcs:    make(map[string]*ast.FuncDecl),
-		types:    make(map[string]types.Type),
-		files:    map[int]*os.File{0: os.Stdin, 1: os.Stdout, 2: os.Stderr},
-		nextFD:   3,
+		funcs:         make(map[string]*ast.FuncDecl),
+		types:         make(map[string]types.Type),
+		files:         map[int]*os.File{0: os.Stdin, 1: os.Stdout, 2: os.Stderr},
+		nextFD:        3,
 		packages:      make(map[string]*Env),
 		importAliases: make(map[string]string),
 	}

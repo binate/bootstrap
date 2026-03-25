@@ -28,7 +28,7 @@ const (
 	FOR
 	FUNC
 	IF
-	IMPL      // [DEFERRED] but reserved
+	IMPL // [DEFERRED] but reserved
 	IMPORT
 	IN
 	INTERFACE // [DEFERRED] but reserved
@@ -53,28 +53,28 @@ const (
 	builtinEnd
 
 	// Operators
-	PLUS     // +
-	MINUS    // -
-	STAR     // *
-	SLASH    // /
-	PERCENT  // %
-	AMP      // &
-	PIPE     // |
-	CARET    // ^
-	TILDE    // ~
-	SHL      // <<
-	SHR      // >>
-	EQ       // ==
-	NEQ      // !=
-	LT       // <
-	GT       // >
-	LEQ      // <=
-	GEQ      // >=
-	LAND     // &&
-	LOR      // ||
-	NOT      // !
-	ASSIGN   // =
-	DEFINE   // :=
+	PLUS       // +
+	MINUS      // -
+	STAR       // *
+	SLASH      // /
+	PERCENT    // %
+	AMP        // &
+	PIPE       // |
+	CARET      // ^
+	TILDE      // ~
+	SHL        // <<
+	SHR        // >>
+	EQ         // ==
+	NEQ        // !=
+	LT         // <
+	GT         // >
+	LEQ        // <=
+	GEQ        // >=
+	LAND       // &&
+	LOR        // ||
+	NOT        // !
+	ASSIGN     // =
+	DEFINE     // :=
 	ADD_ASSIGN // +=
 	SUB_ASSIGN // -=
 	MUL_ASSIGN // *=
@@ -89,18 +89,18 @@ const (
 	DEC        // --
 
 	// Punctuation
-	DOT       // .
-	COMMA     // ,
-	COLON     // :
-	AT        // @
-	HASH      // # [DEFERRED] but lexed
-	LPAREN    // (
-	RPAREN    // )
-	LBRACKET  // [
-	RBRACKET  // ]
-	LBRACE    // {
-	RBRACE    // }
-	ELLIPSIS  // ...
+	DOT      // .
+	COMMA    // ,
+	COLON    // :
+	AT       // @
+	HASH     // # [DEFERRED] but lexed
+	LPAREN   // (
+	RPAREN   // )
+	LBRACKET // [
+	RBRACKET // ]
+	LBRACE   // {
+	RBRACE   // }
+	ELLIPSIS // ...
 )
 
 var typeNames = [...]string{

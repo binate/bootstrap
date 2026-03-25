@@ -39,10 +39,10 @@ type TypeExpr interface {
 
 // File represents a complete source file.
 type File struct {
-	Package  token.Pos // position of "package" keyword
-	PkgName  *StringLit
-	Imports  []*ImportSpec
-	Decls    []Decl
+	Package token.Pos // position of "package" keyword
+	PkgName *StringLit
+	Imports []*ImportSpec
+	Decls   []Decl
 }
 
 func (f *File) Pos() token.Pos { return f.Package }
@@ -526,7 +526,7 @@ func (t *StructType) typeExpr()      {}
 
 // StructField represents a field in a struct type.
 type StructField struct {
-	Name *Ident   // nil for anonymous/embedded fields
+	Name *Ident // nil for anonymous/embedded fields
 	Type TypeExpr
 }
 
