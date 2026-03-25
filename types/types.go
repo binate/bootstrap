@@ -274,8 +274,8 @@ func Identical(a, b Type) bool {
 		return true
 	}
 	// Resolve aliases
-	a = resolveAlias(a)
-	b = resolveAlias(b)
+	a = ResolveAlias(a)
+	b = ResolveAlias(b)
 	if a == b {
 		return true
 	}
@@ -322,8 +322,8 @@ func Identical(a, b Type) bool {
 	return false
 }
 
-// resolveAlias strips alias wrappers.
-func resolveAlias(t Type) Type {
+// ResolveAlias strips alias wrappers.
+func ResolveAlias(t Type) Type {
 	for {
 		if a, ok := t.(*AliasType); ok {
 			t = a.Target
@@ -335,7 +335,7 @@ func resolveAlias(t Type) Type {
 
 // IsInteger reports whether t is an integer type.
 func IsInteger(t Type) bool {
-	t = resolveAlias(t)
+	t = ResolveAlias(t)
 	switch t.(type) {
 	case *IntType, *UntypedIntType:
 		return true
@@ -354,7 +354,7 @@ func IsNumeric(t Type) bool {
 
 // IsBool reports whether t is a boolean type.
 func IsBool(t Type) bool {
-	t = resolveAlias(t)
+	t = ResolveAlias(t)
 	switch t.(type) {
 	case *BoolType, *UntypedBoolType:
 		return true
@@ -364,7 +364,7 @@ func IsBool(t Type) bool {
 
 // IsPointer reports whether t is a pointer type (raw or managed).
 func IsPointer(t Type) bool {
-	t = resolveAlias(t)
+	t = ResolveAlias(t)
 	switch t.(type) {
 	case *PointerType, *ManagedPtrType:
 		return true
@@ -374,7 +374,7 @@ func IsPointer(t Type) bool {
 
 // IsSlice reports whether t is a slice type (raw or managed).
 func IsSlice(t Type) bool {
-	t = resolveAlias(t)
+	t = ResolveAlias(t)
 	switch t.(type) {
 	case *SliceType, *ManagedSliceType:
 		return true
@@ -426,7 +426,7 @@ func AssignableTo(src, dst Type) bool {
 
 // SliceElem returns the element type of a slice or managed slice, or nil.
 func SliceElem(t Type) Type {
-	t = resolveAlias(t)
+	t = ResolveAlias(t)
 	switch st := t.(type) {
 	case *SliceType:
 		return st.Elem
@@ -438,7 +438,7 @@ func SliceElem(t Type) Type {
 
 // PointerElem returns the element type of a pointer (raw or managed), or nil.
 func PointerElem(t Type) Type {
-	t = resolveAlias(t)
+	t = ResolveAlias(t)
 	switch pt := t.(type) {
 	case *PointerType:
 		return pt.Elem

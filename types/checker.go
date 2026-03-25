@@ -99,6 +99,14 @@ func (c *Checker) universeScope() *Scope {
 	s.define(&Symbol{Name: "true", Type: Typ_untypedBool, Kind: ConstSym})
 	s.define(&Symbol{Name: "false", Type: Typ_untypedBool, Kind: ConstSym})
 	s.define(&Symbol{Name: "nil", Type: Typ_nil, Kind: ConstSym})
+
+	// Builtin functions (interpreter-provided, variadic — use special marker)
+	builtinType := &FuncType{} // empty signature — checked specially
+	s.define(&Symbol{Name: "print", Type: builtinType, Kind: FuncSym})
+	s.define(&Symbol{Name: "println", Type: builtinType, Kind: FuncSym})
+	s.define(&Symbol{Name: "exit", Type: &FuncType{
+		Params: []*Param{{Name: "code", Type: Typ_int}},
+	}, Kind: FuncSym})
 	return s
 }
 
@@ -525,7 +533,7 @@ func (c *Checker) checkForStmt(s *ast.ForStmt) {
 }
 
 func (c *Checker) forInElemType(pos token.Pos, t Type) Type {
-	t = resolveAlias(t)
+	t = ResolveAlias(t)
 	switch st := t.(type) {
 	case *SliceType:
 		return st.Elem
@@ -708,7 +716,12 @@ func (c *Checker) checkCallExpr(e *ast.CallExpr) Type {
 		c.errorf(e.Fun.Pos(), "cannot call non-function %s", fnType)
 		return Typ_void
 	}
-	if len(e.Args) != len(ft.Params) {
+	// Variadic builtins (print, println) have empty param lists — just check args.
+	if len(ft.Params) == 0 && len(e.Args) > 0 {
+		for _, arg := range e.Args {
+			c.checkExpr(arg)
+		}
+	} else if len(e.Args) != len(ft.Params) {
 		c.errorf(e.Fun.Pos(), "wrong number of arguments: got %d, want %d",
 			len(e.Args), len(ft.Params))
 	} else {
@@ -736,7 +749,7 @@ func (c *Checker) checkIndexExpr(e *ast.IndexExpr) Type {
 		c.errorf(e.Index.Pos(), "index must be integer, got %s", idxType)
 	}
 
-	xt = resolveAlias(xt)
+	xt = ResolveAlias(xt)
 	switch t := xt.(type) {
 	case *SliceType:
 		return t.Elem
@@ -768,7 +781,7 @@ func (c *Checker) checkSliceExpr(e *ast.SliceExpr) Type {
 		}
 	}
 
-	xt = resolveAlias(xt)
+	xt = ResolveAlias(xt)
 	switch t := xt.(type) {
 	case *SliceType:
 		return t
@@ -790,7 +803,7 @@ func (c *Checker) checkSelectorExpr(e *ast.SelectorExpr) Type {
 		xt = elem
 	}
 
-	xt = resolveAlias(xt)
+	xt = ResolveAlias(xt)
 	if st, ok := xt.(*StructType); ok {
 		f := st.FieldByName(e.Sel.Name)
 		if f == nil {
@@ -816,7 +829,7 @@ func (c *Checker) checkSelectorExpr(e *ast.SelectorExpr) Type {
 
 func (c *Checker) checkCompositeLit(e *ast.CompositeLit) Type {
 	typ := c.resolveTypeExpr(e.Type)
-	xt := resolveAlias(typ)
+	xt := ResolveAlias(typ)
 
 	switch st := xt.(type) {
 	case *StructType:
@@ -914,7 +927,7 @@ func (c *Checker) checkBuiltinCall(e *ast.BuiltinCall) Type {
 			return Typ_int
 		}
 		argType := c.checkExpr(e.Args[0])
-		argType = resolveAlias(argType)
+		argType = ResolveAlias(argType)
 		if !IsSlice(argType) {
 			if _, ok := argType.(*ArrayType); !ok {
 				c.errorf(e.Args[0].Pos(), "len argument must be slice or array, got %s", argType)
