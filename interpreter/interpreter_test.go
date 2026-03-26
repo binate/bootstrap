@@ -1011,3 +1011,372 @@ func main() {
 		t.Errorf("expected %q, got %q", "42\n1\n", got)
 	}
 }
+
+func TestBox(t *testing.T) {
+	src := `package "main"
+
+type Point struct {
+	x int
+	y int
+}
+
+func main() {
+	p1 := box(42)
+	println(*p1)
+
+	p2 := box(Point{x: 1, y: 2})
+	println((*p2).x)
+	println((*p2).y)
+}
+`
+	got := runProgram(t, src)
+	expect := "42\n1\n2\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestManagedPointerField(t *testing.T) {
+	src := `package "main"
+
+type Point struct {
+	x int
+	y int
+}
+
+func main() {
+	p := box(Point{x: 10, y: 20})
+	println(p.x)
+	println(p.y)
+	p.x = 99
+	println(p.x)
+}
+`
+	got := runProgram(t, src)
+	expect := "10\n20\n99\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestStringLen(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	s := make([]int, 5)
+	println(len(s))
+	arr := [3]int{1, 2, 3}
+	println(len(arr))
+	empty := make([]int, 0)
+	println(len(empty))
+}
+`
+	got := runProgram(t, src)
+	expect := "5\n3\n0\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestStringSlice(t *testing.T) {
+	// String indexing is supported; test individual character access
+	src := `package "main"
+
+func main() {
+	s := "hello"
+	println(cast(int, s[1]))
+	println(cast(int, s[0]))
+	println(cast(int, s[4]))
+}
+`
+	got := runProgram(t, src)
+	// 'e'=101, 'h'=104, 'o'=111
+	expect := "101\n104\n111\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestSliceEdgeCases(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	s := make([]int, 5)
+	for i := 0; i < 5; i++ {
+		s[i] = i + 1
+	}
+
+	t1 := s[:]
+	println(len(t1))
+	println(t1[0])
+	println(t1[4])
+
+	t2 := s[0:]
+	println(len(t2))
+
+	t3 := s[:len(s)]
+	println(len(t3))
+
+	empty := make([]int, 0)
+	t4 := empty[:]
+	println(len(t4))
+}
+`
+	got := runProgram(t, src)
+	expect := "5\n1\n5\n5\n5\n0\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestBitCast(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	x := 42
+	y := bit_cast(int, x)
+	println(y)
+}
+`
+	got := runProgram(t, src)
+	if got != "42\n" {
+		t.Errorf("expected %q, got %q", "42\n", got)
+	}
+}
+
+func TestForInBreak(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	arr := [5]int{10, 20, 30, 40, 50}
+	sum := 0
+	for v in arr {
+		if v == 30 {
+			break
+		}
+		sum += v
+	}
+	println(sum)
+}
+`
+	got := runProgram(t, src)
+	if got != "30\n" {
+		t.Errorf("expected %q, got %q", "30\n", got)
+	}
+}
+
+func TestForInContinue(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	arr := [5]int{1, 2, 3, 4, 5}
+	sum := 0
+	for v in arr {
+		if v % 2 == 0 {
+			continue
+		}
+		sum += v
+	}
+	println(sum)
+}
+`
+	got := runProgram(t, src)
+	// 1 + 3 + 5 = 9
+	if got != "9\n" {
+		t.Errorf("expected %q, got %q", "9\n", got)
+	}
+}
+
+func TestShortCircuit(t *testing.T) {
+	src := `package "main"
+
+var counter int
+
+func sideEffect(val bool) bool {
+	counter++
+	return val
+}
+
+func main() {
+	counter = 0
+	r1 := false && sideEffect(true)
+	println(r1)
+	println(counter)
+
+	counter = 0
+	r2 := true || sideEffect(true)
+	println(r2)
+	println(counter)
+
+	counter = 0
+	r3 := true && sideEffect(false)
+	println(r3)
+	println(counter)
+
+	counter = 0
+	r4 := false || sideEffect(true)
+	println(r4)
+	println(counter)
+}
+`
+	got := runProgram(t, src)
+	// false && ... => short-circuit, result=false, counter stays 0
+	// true || ... => short-circuit, result=true, counter stays 0
+	// true && sideEffect(false) => sideEffect called, result=false, counter=1
+	// false || sideEffect(true) => sideEffect called, result=true, counter=1
+	expect := "false\n0\ntrue\n0\nfalse\n1\ntrue\n1\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestCompoundAssignAll(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	x := 0xFF
+	x &= 0x0F
+	println(x)
+
+	y := 0xF0
+	y |= 0x0F
+	println(y)
+
+	z := 0xFF
+	z ^= 0x0F
+	println(z)
+
+	a := 1
+	a <<= 4
+	println(a)
+
+	b := 32
+	b >>= 2
+	println(b)
+}
+`
+	got := runProgram(t, src)
+	expect := "15\n255\n240\n16\n8\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestPointerComparison(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var p *int = nil
+	println(p == nil)
+	println(p != nil)
+
+	x := 42
+	q := &x
+	println(q != nil)
+	println(q == nil)
+}
+`
+	got := runProgram(t, src)
+	expect := "true\nfalse\ntrue\nfalse\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestStructPointerAssign(t *testing.T) {
+	src := `package "main"
+
+type Point struct {
+	x int
+	y int
+}
+
+func main() {
+	p := Point{x: 1, y: 2}
+	ptr := &p
+	ptr.x = 100
+	println(p.x)
+	println(ptr.y)
+}
+`
+	got := runProgram(t, src)
+	expect := "100\n2\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestPanicBuiltin(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	panic("something went wrong")
+}
+`
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic")
+		}
+		msg, ok := r.(string)
+		if !ok {
+			t.Fatalf("expected string panic, got %T: %v", r, r)
+		}
+		if !strings.Contains(msg, "something went wrong") {
+			t.Errorf("expected panic message containing 'something went wrong', got %q", msg)
+		}
+	}()
+	runProgram(t, src)
+}
+
+func TestLenOnVariousTypes(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	arr := [4]int{1, 2, 3, 4}
+	println(len(arr))
+
+	sl := make([]int, 7)
+	println(len(sl))
+
+	ms := make([]int, 3)
+	println(len(ms))
+
+	sl2 := make([]int, 0)
+	sl2 = append(sl2, 10)
+	sl2 = append(sl2, 20)
+	println(len(sl2))
+}
+`
+	got := runProgram(t, src)
+	expect := "4\n7\n3\n2\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestNestedFunctionCalls(t *testing.T) {
+	src := `package "main"
+
+func baz(x int) int {
+	return x * 2
+}
+
+func bar(x int) int {
+	return x + 10
+}
+
+func foo(x int) int {
+	return x * 3
+}
+
+func main() {
+	println(foo(bar(baz(1))))
+}
+`
+	got := runProgram(t, src)
+	// baz(1) = 2, bar(2) = 12, foo(12) = 36
+	if got != "36\n" {
+		t.Errorf("expected %q, got %q", "36\n", got)
+	}
+}
