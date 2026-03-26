@@ -6,6 +6,7 @@ A tree-walking interpreter for the Binate programming language, written in Go. T
 
 ```
 binate [-root dir] <file.bn> [file2.bn ...] [-- args...]
+binate -test [-root dir] <pkg/foo> [pkg/bar ...]
 ```
 
 Run from your project root (or specify it with `-root`):
@@ -22,6 +23,12 @@ go run main.go cat.bn -- /etc/hosts
 
 # With explicit project root
 go run main.go -root myproject myproject/main.bn
+
+# Run tests for a package
+go run main.go -test -root myproject pkg/token
+
+# Run tests for multiple packages
+go run main.go -test -root myproject pkg/token pkg/ast
 ```
 
 ## Project Structure
@@ -143,6 +150,35 @@ The `pkg/bootstrap` package provides OS-level primitives backed by Go in the boo
 | `Concat` | `(a []char, b []char) []char` | Concatenate two strings |
 
 Constants: `O_RDONLY`, `O_WRONLY`, `O_RDWR`, `O_CREATE`, `O_TRUNC`, `O_APPEND`, `STDIN`, `STDOUT`, `STDERR`.
+
+## Testing
+
+The bootstrap supports running unit tests for Binate packages:
+
+```sh
+go run main.go -test -root myproject pkg/foo pkg/bar
+```
+
+### Convention
+
+- Test files are named `*_test.bn` and live in the package directory alongside regular `.bn` files.
+- Test files use the same `package` declaration as the package they test (same-package tests). They can access all symbols, including unexported helpers.
+- Test files are **excluded** from normal builds. They are only included when the package is specified as a `-test` target.
+- Test functions are named `TestXxx()` — no parameters, no return value. They are discovered and run automatically.
+- Tests signal failure by calling `panic("message")`. The test runner catches panics and reports them.
+
+### Example
+
+`pkg/foo/foo_test.bn`:
+```
+package "pkg/foo"
+
+func TestAdd() {
+    if add(2, 3) != 5 {
+        panic("add(2, 3) != 5")
+    }
+}
+```
 
 ## Deferred from Bootstrap
 

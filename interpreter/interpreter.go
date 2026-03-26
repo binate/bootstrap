@@ -439,6 +439,52 @@ func (interp *Interpreter) LoadPackage(path string, file *ast.File, checker *typ
 	interp.importAliases = savedAliases
 }
 
+// RunTestFunc calls a named no-arg function in a loaded package's scope.
+// Returns "" on success, or the panic/error message on failure.
+func (interp *Interpreter) RunTestFunc(pkgPath string, funcName string) (errMsg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			if re, ok := r.(*RuntimeError); ok {
+				errMsg = re.Error()
+			} else {
+				errMsg = fmt.Sprintf("%v", r)
+			}
+		}
+	}()
+
+	env := interp.packages[pkgPath]
+	if env == nil {
+		return fmt.Sprintf("package %s not loaded", pkgPath)
+	}
+
+	val, found := env.get(funcName)
+	if !found {
+		return fmt.Sprintf("function %s not found in %s", funcName, pkgPath)
+	}
+
+	fv, ok := val.(*FuncVal)
+	if !ok {
+		return fmt.Sprintf("%s.%s is not a function", pkgPath, funcName)
+	}
+
+	// Set up the package's type/alias context
+	savedTypes := interp.types
+	savedAliases := interp.importAliases
+	if fv.Types != nil {
+		interp.types = fv.Types
+	}
+	if fv.Aliases != nil {
+		interp.importAliases = fv.Aliases
+	}
+	defer func() {
+		interp.types = savedTypes
+		interp.importAliases = savedAliases
+	}()
+
+	interp.callFuncInEnv(fv.Decl, nil, fv.Env)
+	return ""
+}
+
 func (interp *Interpreter) execTopLevelDecl(d ast.Decl) {
 	switch d := d.(type) {
 	case *ast.FuncDecl:

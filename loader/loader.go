@@ -23,11 +23,12 @@ type Package struct {
 
 // Loader discovers and parses packages from a project root.
 type Loader struct {
-	Root     string              // project root directory
-	Packages map[string]*Package // import path -> parsed package
-	Order    []string            // topological order (dependencies first)
-	Errors   []string            // accumulated errors
-	loading  map[string]bool     // cycle detection: packages being loaded
+	Root         string              // project root directory
+	Packages     map[string]*Package // import path -> parsed package
+	Order        []string            // topological order (dependencies first)
+	Errors       []string            // accumulated errors
+	TestPackages map[string]bool     // packages that should include _test.bn files
+	loading      map[string]bool     // cycle detection: packages being loaded
 }
 
 // New creates a loader with the given project root.
@@ -114,10 +115,15 @@ func (l *Loader) loadPackage(path string, imp *ast.ImportSpec) {
 			return entries[i].Name() < entries[j].Name()
 		})
 		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".bn") {
+			name := entry.Name()
+			if entry.IsDir() || !strings.HasSuffix(name, ".bn") {
 				continue
 			}
-			filePath := filepath.Join(implDir, entry.Name())
+			// Exclude _test.bn files unless this is a test target package.
+			if strings.HasSuffix(name, "_test.bn") && !l.TestPackages[path] {
+				continue
+			}
+			filePath := filepath.Join(implDir, name)
 			data, err := os.ReadFile(filePath)
 			if err != nil {
 				l.Errors = append(l.Errors, fmt.Sprintf("error reading %s: %s", filePath, err))
