@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/binate/bootstrap/ast"
 	"github.com/binate/bootstrap/interpreter"
 	"github.com/binate/bootstrap/parser"
 	"github.com/binate/bootstrap/types"
@@ -44,5 +45,19 @@ func main() {
 
 	// Run
 	interp := interpreter.New()
+	runWithRecovery(interp, f, c)
+}
+
+func runWithRecovery(interp *interpreter.Interpreter, f *ast.File, c *types.Checker) {
+	defer func() {
+		if r := recover(); r != nil {
+			if re, ok := r.(*interpreter.RuntimeError); ok {
+				fmt.Fprintf(os.Stderr, "%s\n", re.Error())
+			} else {
+				fmt.Fprintf(os.Stderr, "runtime error: %v\n", r)
+			}
+			os.Exit(2)
+		}
+	}()
 	interp.Run(f, c)
 }

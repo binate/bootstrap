@@ -11,6 +11,23 @@ import (
 	"github.com/binate/bootstrap/types"
 )
 
+// RuntimeError represents a runtime error with source position.
+type RuntimeError struct {
+	Pos token.Pos
+	Msg string
+}
+
+func (e *RuntimeError) Error() string {
+	if e.Pos.File != "" {
+		return fmt.Sprintf("%s: runtime error: %s", e.Pos, e.Msg)
+	}
+	return fmt.Sprintf("runtime error: %s", e.Msg)
+}
+
+func runtimePanic(pos token.Pos, format string, args ...interface{}) {
+	panic(&RuntimeError{Pos: pos, Msg: fmt.Sprintf(format, args...)})
+}
+
 // Interpreter evaluates a Binate AST.
 type Interpreter struct {
 	env           *Env
@@ -559,7 +576,7 @@ func (interp *Interpreter) execAssign(s *ast.AssignStmt) {
 		lhs := interp.evalExpr(s.LHS[0])
 		rhs := interp.evalExpr(s.RHS[0])
 		baseOp := compoundToBase(s.Op)
-		result := interp.evalBinaryOp(baseOp, lhs, rhs)
+		result := interp.evalBinaryOp(s.LHS[0].Pos(), baseOp, lhs, rhs)
 		interp.assignTo(s.LHS[0], result)
 	}
 }
@@ -576,8 +593,14 @@ func (interp *Interpreter) assignTo(lhs ast.Expr, val Value) {
 		i := idx.(*IntVal).Val
 		switch c := container.(type) {
 		case *SliceVal:
+			if i < 0 || int(i) >= len(c.Elems) {
+				runtimePanic(lhs.Index.Pos(), "index out of bounds: %d (len %d)", i, len(c.Elems))
+			}
 			c.Elems[i] = val
 		case *ArrayVal:
+			if i < 0 || int(i) >= len(c.Elems) {
+				runtimePanic(lhs.Index.Pos(), "index out of bounds: %d (len %d)", i, len(c.Elems))
+			}
 			c.Elems[i] = val
 		default:
 			panic(fmt.Sprintf("cannot index-assign to %T", container))
@@ -882,14 +905,14 @@ func (interp *Interpreter) evalBinary(e *ast.BinaryExpr) Value {
 		return &BoolVal{Val: interp.isTruthy(rhs)}
 	}
 	rhs := interp.evalExpr(e.Y)
-	return interp.evalBinaryOp(e.Op, lhs, rhs)
+	return interp.evalBinaryOp(e.Pos(), e.Op, lhs, rhs)
 }
 
-func (interp *Interpreter) evalBinaryOp(op token.Type, lhs, rhs Value) Value {
+func (interp *Interpreter) evalBinaryOp(pos token.Pos, op token.Type, lhs, rhs Value) Value {
 	// Integer arithmetic
 	if lv, ok := lhs.(*IntVal); ok {
 		if rv, ok := rhs.(*IntVal); ok {
-			return interp.evalIntBinaryOp(op, lv, rv)
+			return interp.evalIntBinaryOp(pos, op, lv, rv)
 		}
 	}
 
@@ -948,7 +971,7 @@ func (interp *Interpreter) evalBinaryOp(op token.Type, lhs, rhs Value) Value {
 	panic(fmt.Sprintf("unsupported binary operation: %s %s %s", lhs.Type(), op, rhs.Type()))
 }
 
-func (interp *Interpreter) evalIntBinaryOp(op token.Type, lv, rv *IntVal) Value {
+func (interp *Interpreter) evalIntBinaryOp(pos token.Pos, op token.Type, lv, rv *IntVal) Value {
 	l, r := lv.Val, rv.Val
 	switch op {
 	case token.PLUS:
@@ -959,12 +982,12 @@ func (interp *Interpreter) evalIntBinaryOp(op token.Type, lv, rv *IntVal) Value 
 		return &IntVal{Val: l * r, Typ: lv.Typ}
 	case token.SLASH:
 		if r == 0 {
-			panic("division by zero")
+			runtimePanic(pos, "division by zero")
 		}
 		return &IntVal{Val: l / r, Typ: lv.Typ}
 	case token.PERCENT:
 		if r == 0 {
-			panic("division by zero")
+			runtimePanic(pos, "division by zero")
 		}
 		return &IntVal{Val: l % r, Typ: lv.Typ}
 	case token.AMP:
@@ -1029,12 +1052,19 @@ func (interp *Interpreter) evalUnary(e *ast.UnaryExpr) Value {
 		// Dereference
 		switch p := x.(type) {
 		case *PointerVal:
+			if p.Addr == nil {
+				runtimePanic(e.Pos(), "nil pointer dereference")
+			}
 			return p.Addr.Val
 		case *ManagedPtrVal:
+			if p.Addr == nil {
+				runtimePanic(e.Pos(), "nil pointer dereference")
+			}
 			return p.Addr.Val
 		default:
-			panic("cannot dereference non-pointer")
+			runtimePanic(e.Pos(), "cannot dereference non-pointer")
 		}
+		panic("unreachable")
 	case token.AMP:
 		// Address-of — share the variable's backing cell if operand is an ident
 		if ident, ok := e.X.(*ast.Ident); ok {
@@ -1126,12 +1156,12 @@ func (interp *Interpreter) evalIndex(e *ast.IndexExpr) Value {
 	switch c := x.(type) {
 	case *SliceVal:
 		if i < 0 || int(i) >= len(c.Elems) {
-			panic(fmt.Sprintf("index out of bounds: %d (len %d)", i, len(c.Elems)))
+			runtimePanic(e.Index.Pos(), "index out of bounds: %d (len %d)", i, len(c.Elems))
 		}
 		return c.Elems[i]
 	case *ArrayVal:
 		if i < 0 || int(i) >= len(c.Elems) {
-			panic(fmt.Sprintf("index out of bounds: %d (len %d)", i, len(c.Elems)))
+			runtimePanic(e.Index.Pos(), "index out of bounds: %d (len %d)", i, len(c.Elems))
 		}
 		return c.Elems[i]
 	case *PointerVal:
@@ -1440,6 +1470,11 @@ func (interp *Interpreter) coerce(v Value, target types.Type) Value {
 				return &IntVal{Val: iv.Val, Typ: it}
 			}
 		}
+	}
+
+	// NilVal to typed nil pointer/slice
+	if _, ok := v.(*NilVal); ok {
+		return ZeroValue(target)
 	}
 
 	return v
