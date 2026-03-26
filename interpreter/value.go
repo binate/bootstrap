@@ -32,14 +32,6 @@ type BoolVal struct {
 func (v *BoolVal) Type() types.Type { return types.Typ_bool }
 func (v *BoolVal) String() string   { return fmt.Sprintf("%t", v.Val) }
 
-// CharVal represents a character value.
-type CharVal struct {
-	Val rune
-}
-
-func (v *CharVal) Type() types.Type { return types.Typ_char }
-func (v *CharVal) String() string   { return string(v.Val) }
-
 // StringVal represents a string literal value ([]byte internally).
 type StringVal struct {
 	Val string // unescaped string content (without quotes)
@@ -168,8 +160,6 @@ func ZeroValue(t types.Type) Value {
 		return &IntVal{Val: 0, Typ: t}
 	case *types.BoolType:
 		return &BoolVal{Val: false}
-	case *types.CharType:
-		return &CharVal{Val: 0}
 	case *types.StringLitType:
 		return &StringVal{Val: ""}
 	case *types.PointerType:

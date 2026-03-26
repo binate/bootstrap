@@ -210,8 +210,6 @@ func (interp *Interpreter) registerBootstrapPackage() {
 				switch ev := e.(type) {
 				case *IntVal:
 					buf[i] = byte(ev.Val)
-				case *CharVal:
-					buf[i] = byte(ev.Val)
 				}
 			}
 			return string(buf)
@@ -1077,14 +1075,14 @@ func (interp *Interpreter) evalCharLit(e *ast.CharLit) Value {
 		raw = raw[1 : len(raw)-1]
 	}
 	if len(raw) == 0 {
-		return &CharVal{Val: 0}
+		return &IntVal{Val: 0, Typ: types.Typ_uint8}
 	}
 	if raw[0] == '\\' && len(raw) > 1 {
 		ch := unescapeChar(raw)
-		return &CharVal{Val: ch}
+		return &IntVal{Val: int64(ch), Typ: types.Typ_uint8}
 	}
 	r := []rune(raw)
-	return &CharVal{Val: r[0]}
+	return &IntVal{Val: int64(r[0]), Typ: types.Typ_uint8}
 }
 
 func (interp *Interpreter) evalIdent(e *ast.Ident) Value {
@@ -1165,18 +1163,6 @@ func (interp *Interpreter) evalBinaryOp(pos token.Pos, op token.Type, lhs, rhs V
 				return &BoolVal{Val: lv.Val <= rv.Val}
 			case token.GEQ:
 				return &BoolVal{Val: lv.Val >= rv.Val}
-			}
-		}
-	}
-
-	// Char comparison
-	if lv, ok := lhs.(*CharVal); ok {
-		if rv, ok := rhs.(*CharVal); ok {
-			switch op {
-			case token.EQ:
-				return &BoolVal{Val: lv.Val == rv.Val}
-			case token.NEQ:
-				return &BoolVal{Val: lv.Val != rv.Val}
 			}
 		}
 	}
@@ -1397,7 +1383,7 @@ func (interp *Interpreter) evalIndex(e *ast.IndexExpr) Value {
 		if i < 0 || int(i) >= len(c.Val) {
 			runtimePanic(e.Index.Pos(), "index out of bounds: %d (len %d)", i, len(c.Val))
 		}
-		return &CharVal{Val: rune(c.Val[i])}
+		return &IntVal{Val: int64(c.Val[i]), Typ: types.Typ_uint8}
 	case *PointerVal:
 		// Pointer arithmetic — not implemented in bootstrap
 		panic("pointer indexing not supported")
@@ -1598,17 +1584,6 @@ func (interp *Interpreter) evalCast(e *ast.BuiltinCall) Value {
 		if iv, ok := arg.(*IntVal); ok {
 			return &IntVal{Val: truncateInt(iv.Val, it), Typ: it}
 		}
-		// Char to int
-		if cv, ok := arg.(*CharVal); ok {
-			return &IntVal{Val: int64(cv.Val), Typ: it}
-		}
-	}
-
-	// Int to char
-	if _, ok := targetType.(*types.CharType); ok {
-		if iv, ok := arg.(*IntVal); ok {
-			return &CharVal{Val: rune(iv.Val)}
-		}
 	}
 
 	// Named type cast
@@ -1680,11 +1655,6 @@ func (interp *Interpreter) valuesEqual(a, b Value) bool {
 	if ab, ok := a.(*BoolVal); ok {
 		if bb, ok := b.(*BoolVal); ok {
 			return ab.Val == bb.Val
-		}
-	}
-	if ac, ok := a.(*CharVal); ok {
-		if bc, ok := b.(*CharVal); ok {
-			return ac.Val == bc.Val
 		}
 	}
 	return false

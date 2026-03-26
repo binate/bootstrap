@@ -34,13 +34,6 @@ func (t *BoolType) String() string   { return "bool" }
 func (t *BoolType) Underlying() Type { return t }
 func (t *BoolType) typeNode()        {}
 
-// CharType represents the char type (32-bit Unicode code point).
-type CharType struct{}
-
-func (t *CharType) String() string   { return "char" }
-func (t *CharType) Underlying() Type { return t }
-func (t *CharType) typeNode()        {}
-
 // StringLitType is the type of string literals (internally []byte).
 type StringLitType struct{}
 
@@ -223,7 +216,7 @@ func (t *AliasType) typeNode()        {}
 
 var (
 	Typ_bool = &BoolType{}
-	Typ_char = &CharType{}
+	Typ_char = Typ_uint8 // char is an alias for uint8
 
 	Typ_int   = &IntType{Width: 64, Signed: true, Name: "int"}
 	Typ_int8  = &IntType{Width: 8, Signed: true, Name: "int8"}
