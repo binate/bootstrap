@@ -358,12 +358,62 @@ func (interp *Interpreter) Run(file *ast.File, checker *types.Checker) {
 	}
 }
 
+// LoadPackage loads a non-main package: evaluates its top-level declarations
+// and registers the resulting environment as a package scope.
+func (interp *Interpreter) LoadPackage(path string, file *ast.File, checker *types.Checker) {
+	if _, ok := interp.packages[path]; ok {
+		return // already loaded
+	}
+
+	// Save interpreter state
+	savedEnv := interp.env
+	savedFuncs := interp.funcs
+	savedTypes := interp.types
+	savedAliases := interp.importAliases
+
+	// Set up fresh state for this package
+	interp.funcs = make(map[string]*ast.FuncDecl)
+	interp.types = make(map[string]types.Type)
+	interp.importAliases = make(map[string]string)
+	interp.env = newEnv(nil)
+	interp.registerBuiltins() // builtins available in all packages
+
+	// Register this package's imports
+	for _, imp := range file.Imports {
+		impPath := imp.Path.Value
+		if len(impPath) >= 2 {
+			impPath = impPath[1 : len(impPath)-1]
+		}
+		name := imp.Alias
+		if name == "" {
+			parts := strings.Split(impPath, "/")
+			name = parts[len(parts)-1]
+		}
+		interp.importAliases[name] = impPath
+	}
+
+	// Execute top-level declarations
+	interp.env = newEnv(interp.env) // package scope
+	for _, d := range file.Decls {
+		interp.execTopLevelDecl(d)
+	}
+
+	// Save the package env
+	interp.packages[path] = interp.env
+
+	// Restore interpreter state
+	interp.env = savedEnv
+	interp.funcs = savedFuncs
+	interp.types = savedTypes
+	interp.importAliases = savedAliases
+}
+
 func (interp *Interpreter) execTopLevelDecl(d ast.Decl) {
 	switch d := d.(type) {
 	case *ast.FuncDecl:
 		interp.funcs[d.Name.Name] = d
 		ft := interp.resolveFuncType(d)
-		interp.env.define(d.Name.Name, &FuncVal{Name: d.Name.Name, Typ: ft})
+		interp.env.define(d.Name.Name, &FuncVal{Name: d.Name.Name, Typ: ft, Decl: d})
 	case *ast.VarDecl:
 		interp.execVarDecl(d)
 	case *ast.ConstDecl:
@@ -1131,8 +1181,7 @@ func (interp *Interpreter) evalCall(e *ast.CallExpr) Value {
 		panic(fmt.Sprintf("cannot call %T", fn))
 	}
 
-	decl, ok := interp.funcs[fv.Name]
-	if !ok {
+	if fv.Decl == nil {
 		panic(fmt.Sprintf("undefined function: %s", fv.Name))
 	}
 
@@ -1141,7 +1190,7 @@ func (interp *Interpreter) evalCall(e *ast.CallExpr) Value {
 		args = append(args, interp.evalExpr(a))
 	}
 
-	return interp.callFunc(decl, args)
+	return interp.callFunc(fv.Decl, args)
 }
 
 func (interp *Interpreter) callFunc(decl *ast.FuncDecl, args []Value) Value {

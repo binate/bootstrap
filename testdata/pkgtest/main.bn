@@ -1,0 +1,14 @@
+package "main"
+
+import "pkg/math"
+import "pkg/util"
+
+func main() {
+	println(math.abs(-42))
+	println(math.max(10, 20))
+	println(math.min(10, 20))
+	println(math.PI_APPROX)
+	println(util.clamp(50, 0, 10))
+	println(util.clamp(-5, 0, 10))
+	println(util.clamp(5, 0, 10))
+}

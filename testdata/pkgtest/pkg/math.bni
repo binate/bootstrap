@@ -1,0 +1,7 @@
+package "pkg/math"
+
+func abs(x int) int
+func max(a int, b int) int
+func min(a int, b int) int
+
+const PI_APPROX int = 3

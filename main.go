@@ -3,9 +3,12 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/binate/bootstrap/ast"
 	"github.com/binate/bootstrap/interpreter"
+	"github.com/binate/bootstrap/loader"
 	"github.com/binate/bootstrap/parser"
 	"github.com/binate/bootstrap/types"
 )
@@ -18,7 +21,7 @@ func main() {
 
 	// Split args at "--": files before, program args after
 	var filenames []string
-	progArgs := []string{} // args passed to the Binate program
+	progArgs := []string{}
 	seenSep := false
 	for _, arg := range os.Args[1:] {
 		if arg == "--" {
@@ -36,7 +39,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Parse all files
+	// Parse all main package files
 	var files []*ast.File
 	hasErrors := false
 	for _, filename := range filenames {
@@ -59,15 +62,41 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Merge files into a single AST
-	merged, err := mergeFiles(files)
+	// Merge main package files
+	merged, err := loader.MergeFiles(files)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
 	}
 
-	// Type check
+	// Determine project root from first file's path and package declaration
+	root := inferRoot(filenames[0], merged.PkgName.Value)
+
+	// Load all imported packages
+	ldr := loader.New(root)
+	ldr.RegisterBuiltin("pkg/bootstrap")
+	ldr.LoadImports(merged.Imports)
+	if len(ldr.Errors) > 0 {
+		for _, e := range ldr.Errors {
+			fmt.Fprintf(os.Stderr, "%s\n", e)
+		}
+		os.Exit(1)
+	}
+
+	// Type check: packages in dependency order, then main
 	c := types.NewChecker()
+	for _, pkgPath := range ldr.Order {
+		pkg := ldr.Packages[pkgPath]
+		if pkg.Builtin {
+			continue
+		}
+		if pkg.BNI != nil {
+			c.LoadPackageInterface(pkgPath, pkg.BNI)
+		}
+		if pkg.Merged != nil {
+			c.CheckPackage(pkgPath, pkg.Merged)
+		}
+	}
 	c.Check(merged)
 	if len(c.Errors()) > 0 {
 		for _, e := range c.Errors() {
@@ -76,63 +105,48 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Run
+	// Run: load packages in dependency order, then run main
 	interp := interpreter.New()
 	interp.SetArgs(progArgs)
+	for _, pkgPath := range ldr.Order {
+		pkg := ldr.Packages[pkgPath]
+		if pkg.Builtin || pkg.Merged == nil {
+			continue
+		}
+		interp.LoadPackage(pkgPath, pkg.Merged, c)
+	}
 	runWithRecovery(interp, merged, c)
 }
 
-// mergeFiles combines multiple parsed files from the same package into one.
-// All files must declare the same package name. Imports are deduplicated,
-// declarations are concatenated in file order.
-func mergeFiles(files []*ast.File) (*ast.File, error) {
-	if len(files) == 0 {
-		return nil, fmt.Errorf("no files to merge")
+// inferRoot determines the project root from a source file path and its
+// package declaration. For example, if the file is at /project/cmd/app/main.bn
+// and declares package "cmd/app", root is /project. For package "main",
+// root is the directory containing the file.
+func inferRoot(filename string, pkgName string) string {
+	absPath, err := filepath.Abs(filename)
+	if err != nil {
+		return filepath.Dir(filename)
 	}
-	if len(files) == 1 {
-		return files[0], nil
+	dir := filepath.Dir(absPath)
+
+	// Strip quotes from package name
+	pkg := pkgName
+	if len(pkg) >= 2 && pkg[0] == '"' && pkg[len(pkg)-1] == '"' {
+		pkg = pkg[1 : len(pkg)-1]
 	}
 
-	first := files[0]
-	pkgName := first.PkgName.Value
-
-	// Verify all files declare the same package
-	for _, f := range files[1:] {
-		if f.PkgName.Value != pkgName {
-			return nil, fmt.Errorf("%s: package %s differs from %s in %s",
-				f.Pos(), f.PkgName.Value, pkgName, first.Pos())
-		}
+	// For "main" package, root is the directory of the file
+	if pkg == "main" {
+		return dir
 	}
 
-	// Merge imports (deduplicate by path+alias)
-	type importKey struct {
-		alias string
-		path  string
+	// For other packages, walk up from dir by the number of path components
+	parts := strings.Split(pkg, "/")
+	root := dir
+	for range parts {
+		root = filepath.Dir(root)
 	}
-	seen := make(map[importKey]bool)
-	var imports []*ast.ImportSpec
-	for _, f := range files {
-		for _, imp := range f.Imports {
-			key := importKey{alias: imp.Alias, path: imp.Path.Value}
-			if !seen[key] {
-				seen[key] = true
-				imports = append(imports, imp)
-			}
-		}
-	}
-
-	// Concatenate declarations
-	var decls []ast.Decl
-	for _, f := range files {
-		decls = append(decls, f.Decls...)
-	}
-
-	return &ast.File{
-		Package: first.Package,
-		PkgName: first.PkgName,
-		Imports: imports,
-		Decls:   decls,
-	}, nil
+	return root
 }
 
 func runWithRecovery(interp *interpreter.Interpreter, f *ast.File, c *types.Checker) {

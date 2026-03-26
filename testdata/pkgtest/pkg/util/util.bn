@@ -1,0 +1,7 @@
+package "pkg/util"
+
+import "pkg/math"
+
+func clamp(x int, lo int, hi int) int {
+	return math.min(math.max(x, lo), hi)
+}

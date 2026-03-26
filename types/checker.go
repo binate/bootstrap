@@ -93,6 +93,66 @@ func NewChecker() *Checker {
 	return c
 }
 
+// LoadPackageInterface registers a package scope from a parsed .bni file.
+// The .bni must already be parsed. This makes the package available for
+// import by downstream packages during type checking.
+func (c *Checker) LoadPackageInterface(path string, bni *ast.File) {
+	if _, ok := c.packages[path]; ok {
+		return // already loaded
+	}
+	scope := c.buildScopeFromFile(bni)
+	c.packages[path] = scope
+}
+
+// CheckPackage type-checks a package's implementation files (merged into one AST).
+// If the package has no .bni (and thus no pre-registered scope), the scope is
+// built from the implementation's top-level declarations.
+func (c *Checker) CheckPackage(path string, merged *ast.File) {
+	// Save and restore checker state
+	savedFile := c.file
+	savedScope := c.scope
+	savedFuncRet := c.funcRet
+	defer func() {
+		c.file = savedFile
+		c.scope = savedScope
+		c.funcRet = savedFuncRet
+	}()
+
+	c.file = merged
+	c.pushScope() // package scope
+
+	// Register imports
+	for _, imp := range merged.Imports {
+		impPath := imp.Path.Value
+		if len(impPath) >= 2 {
+			impPath = impPath[1 : len(impPath)-1]
+		}
+		name := imp.Alias
+		if name == "" {
+			parts := strings.Split(impPath, "/")
+			name = parts[len(parts)-1]
+		}
+		if _, ok := c.packages[impPath]; !ok {
+			c.errorf(imp.Pos(), "unknown package %q", impPath)
+			continue
+		}
+		c.scope.define(&Symbol{Name: name, Type: nil, Kind: PkgSym, PkgPath: impPath})
+	}
+
+	// Pass 1: collect declarations
+	c.collectDecls(merged.Decls)
+
+	// Pass 2: check bodies
+	c.checkDecls(merged.Decls)
+
+	// If no .bni was pre-loaded, register the implementation's scope as the package scope
+	if _, ok := c.packages[path]; !ok {
+		c.packages[path] = c.scope
+	}
+
+	c.popScope()
+}
+
 // Errors returns all type-checking errors.
 func (c *Checker) Errors() []CheckError {
 	return c.errors
@@ -137,7 +197,13 @@ func (c *Checker) loadBNI(src []byte, filename string) *Scope {
 		}
 		return newScope(nil)
 	}
+	return c.buildScopeFromFile(f)
+}
 
+// buildScopeFromFile builds a package scope from a parsed file's declarations.
+// Used for both .bni interface files and implementation files that need to
+// export their declarations as a package scope.
+func (c *Checker) buildScopeFromFile(f *ast.File) *Scope {
 	s := newScope(nil)
 
 	// Set up a temporary scope for resolving types in declarations.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/binate/bootstrap/ast"
 	"github.com/binate/bootstrap/types"
 )
 
@@ -131,6 +132,7 @@ func (v *StructVal) String() string {
 type FuncVal struct {
 	Name string
 	Typ  *types.FuncType
+	Decl *ast.FuncDecl // AST declaration (for calling)
 }
 
 func (v *FuncVal) Type() types.Type { return v.Typ }

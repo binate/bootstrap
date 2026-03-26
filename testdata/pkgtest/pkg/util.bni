@@ -1,0 +1,3 @@
+package "pkg/util"
+
+func clamp(x int, lo int, hi int) int

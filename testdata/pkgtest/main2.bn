@@ -1,0 +1,10 @@
+package "main"
+
+import "pkg/bootstrap"
+import "pkg/math"
+
+func main() {
+	println(math.abs(-7))
+	s := bootstrap.string(math.max(100, 200))
+	println(s)
+}
