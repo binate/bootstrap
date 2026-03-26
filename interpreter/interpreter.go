@@ -1193,12 +1193,10 @@ func (interp *Interpreter) evalBinaryOp(pos token.Pos, op token.Type, lhs, rhs V
 		}
 	}
 
-	// String operations
+	// String comparisons (no + operator — use Concat for concatenation)
 	if lv, ok := lhs.(*StringVal); ok {
 		if rv, ok := rhs.(*StringVal); ok {
 			switch op {
-			case token.PLUS:
-				return &StringVal{Val: lv.Val + rv.Val}
 			case token.EQ:
 				return &BoolVal{Val: lv.Val == rv.Val}
 			case token.NEQ:

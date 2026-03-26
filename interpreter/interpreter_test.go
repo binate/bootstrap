@@ -1381,21 +1381,6 @@ func main() {
 	}
 }
 
-func TestStringConcat(t *testing.T) {
-	src := `package "main"
-
-func main() {
-	var a []char = "hello"
-	var b []char = " world"
-	println(a + b)
-}
-`
-	got := runProgram(t, src)
-	if got != "hello world\n" {
-		t.Errorf("expected %q, got %q", "hello world\n", got)
-	}
-}
-
 func TestStringLenCharSlice(t *testing.T) {
 	src := `package "main"
 
@@ -1414,17 +1399,17 @@ func main() {
 func TestStringCharSliceAssignable(t *testing.T) {
 	src := `package "main"
 
-func greet(name []char) []char {
-	return "hello " + name
+func greet(name []char) {
+	println(name)
 }
 
 func main() {
-	println(greet("world"))
+	greet("world")
 }
 `
 	got := runProgram(t, src)
-	if got != "hello world\n" {
-		t.Errorf("expected %q, got %q", "hello world\n", got)
+	if got != "world\n" {
+		t.Errorf("expected %q, got %q", "world\n", got)
 	}
 }
 
