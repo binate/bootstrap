@@ -121,6 +121,14 @@ func (c *Checker) CheckPackage(path string, merged *ast.File) {
 	c.file = merged
 	c.pushScope() // package scope
 
+	// If this package has a pre-loaded .bni, import its declarations into
+	// the implementation scope so the .bn files can see types/consts from .bni.
+	if bniScope, ok := c.packages[path]; ok {
+		for name, sym := range bniScope.symbols {
+			c.scope.define(&Symbol{Name: name, Type: sym.Type, Kind: sym.Kind, PkgPath: sym.PkgPath})
+		}
+	}
+
 	// Register imports
 	for _, imp := range merged.Imports {
 		impPath := imp.Path.Value
@@ -227,7 +235,11 @@ func (c *Checker) buildScopeFromFile(f *ast.File) *Scope {
 			s.define(&Symbol{Name: d.Name.Name, Type: typ, Kind: ConstSym})
 		case *ast.TypeDecl:
 			typ := c.resolveTypeExpr(d.Type)
-			s.define(&Symbol{Name: d.Name.Name, Type: typ, Kind: TypeSym})
+			sym := &Symbol{Name: d.Name.Name, Type: typ, Kind: TypeSym}
+			s.define(sym)
+			// Also add to the resolution scope so later declarations
+			// in this file can reference this type.
+			c.scope.define(sym)
 		case *ast.GroupDecl:
 			for _, inner := range d.Decls {
 				switch inner := inner.(type) {
@@ -414,9 +426,27 @@ func (c *Checker) resolveTypeExpr(te ast.TypeExpr) Type {
 
 func (c *Checker) resolveNamedTypeExpr(t *ast.NamedType) Type {
 	if t.Pkg != nil {
-		// Qualified type: pkg.Type — not fully supported in bootstrap
-		c.errorf(t.Pos(), "qualified types not yet supported")
-		return Typ_void
+		// Qualified type: pkg.Type
+		sym := c.scope.lookup(t.Pkg.Name)
+		if sym == nil || sym.Kind != PkgSym {
+			c.errorf(t.Pkg.Pos(), "undefined package: %s", t.Pkg.Name)
+			return Typ_void
+		}
+		pkgScope, ok := c.packages[sym.PkgPath]
+		if !ok {
+			c.errorf(t.Pkg.Pos(), "unknown package %s", t.Pkg.Name)
+			return Typ_void
+		}
+		member := pkgScope.lookup(t.Name.Name)
+		if member == nil {
+			c.errorf(t.Name.Pos(), "package %s has no type %s", t.Pkg.Name, t.Name.Name)
+			return Typ_void
+		}
+		if member.Kind != TypeSym {
+			c.errorf(t.Name.Pos(), "%s.%s is not a type", t.Pkg.Name, t.Name.Name)
+			return Typ_void
+		}
+		return member.Type
 	}
 	sym := c.scope.lookup(t.Name.Name)
 	if sym == nil {
@@ -864,6 +894,14 @@ func (c *Checker) checkBinaryOp(pos token.Pos, op token.Type, lt, rt Type) Type 
 }
 
 func (c *Checker) checkArithOp(pos token.Pos, op token.Type, lt, rt Type) Type {
+	// String concatenation with +
+	if op == token.PLUS {
+		if _, ok := ResolveAlias(lt).(*StringLitType); ok {
+			if _, ok := ResolveAlias(rt).(*StringLitType); ok {
+				return Typ_string
+			}
+		}
+	}
 	if !IsNumeric(lt) {
 		c.errorf(pos, "operator %s requires numeric operands, got %s", op, lt)
 		return Typ_void
@@ -1192,7 +1230,9 @@ func (c *Checker) checkBuiltinCall(e *ast.BuiltinCall) Type {
 		argType = ResolveAlias(argType)
 		if !IsSlice(argType) {
 			if _, ok := argType.(*ArrayType); !ok {
-				c.errorf(e.Args[0].Pos(), "len argument must be slice or array, got %s", argType)
+				if _, ok := argType.(*StringLitType); !ok {
+					c.errorf(e.Args[0].Pos(), "len argument must be slice, array, or string, got %s", argType)
+				}
 			}
 		}
 		return Typ_int

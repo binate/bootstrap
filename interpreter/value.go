@@ -130,9 +130,12 @@ func (v *StructVal) String() string {
 
 // FuncVal represents a function value.
 type FuncVal struct {
-	Name string
-	Typ  *types.FuncType
-	Decl *ast.FuncDecl // AST declaration (for calling)
+	Name    string
+	Typ     *types.FuncType
+	Decl    *ast.FuncDecl         // AST declaration (for calling)
+	Env     *Env                  // defining scope (for cross-package calls)
+	Types   map[string]types.Type // package type map (for cross-package type resolution)
+	Aliases map[string]string     // package import aliases
 }
 
 func (v *FuncVal) Type() types.Type { return v.Typ }

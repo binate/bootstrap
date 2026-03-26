@@ -33,13 +33,14 @@ type Interpreter struct {
 	env           *Env
 	funcs         map[string]*ast.FuncDecl
 	types         map[string]types.Type
-	stdout        *strings.Builder  // captured output (nil = write to os.Stdout)
-	files         map[int]*os.File  // open file descriptors
-	nextFD        int               // next file descriptor to allocate
-	packages      map[string]*Env   // package path -> env
-	importAliases map[string]string // local name -> package path
-	progArgs      []string          // program arguments (from -- separator)
-	iota          int               // current iota value in grouped const (-1 = not in const group)
+	stdout        *strings.Builder                 // captured output (nil = write to os.Stdout)
+	files         map[int]*os.File                 // open file descriptors
+	nextFD        int                              // next file descriptor to allocate
+	packages      map[string]*Env                  // package path -> env
+	packageTypes  map[string]map[string]types.Type // package path -> type map
+	importAliases map[string]string                // local name -> package path
+	progArgs      []string                         // program arguments (from -- separator)
+	iota          int                              // current iota value in grouped const (-1 = not in const group)
 }
 
 // Env represents a variable environment (frame).
@@ -107,6 +108,7 @@ func New() *Interpreter {
 		files:         map[int]*os.File{0: os.Stdin, 1: os.Stdout, 2: os.Stderr},
 		nextFD:        3,
 		packages:      make(map[string]*Env),
+		packageTypes:  make(map[string]map[string]types.Type),
 		importAliases: make(map[string]string),
 		iota:          -1,
 	}
@@ -354,7 +356,7 @@ func (interp *Interpreter) Run(file *ast.File, checker *types.Checker) {
 
 	// Call main if it exists
 	if mainDecl, ok := interp.funcs["main"]; ok {
-		interp.callFunc(mainDecl, nil)
+		interp.callFuncInEnv(mainDecl, nil, interp.env)
 	}
 }
 
@@ -398,8 +400,9 @@ func (interp *Interpreter) LoadPackage(path string, file *ast.File, checker *typ
 		interp.execTopLevelDecl(d)
 	}
 
-	// Save the package env
+	// Save the package env and types
 	interp.packages[path] = interp.env
+	interp.packageTypes[path] = interp.types
 
 	// Restore interpreter state
 	interp.env = savedEnv
@@ -413,7 +416,14 @@ func (interp *Interpreter) execTopLevelDecl(d ast.Decl) {
 	case *ast.FuncDecl:
 		interp.funcs[d.Name.Name] = d
 		ft := interp.resolveFuncType(d)
-		interp.env.define(d.Name.Name, &FuncVal{Name: d.Name.Name, Typ: ft, Decl: d})
+		interp.env.define(d.Name.Name, &FuncVal{
+			Name:    d.Name.Name,
+			Typ:     ft,
+			Decl:    d,
+			Env:     interp.env,
+			Types:   interp.types,
+			Aliases: interp.importAliases,
+		})
 	case *ast.VarDecl:
 		interp.execVarDecl(d)
 	case *ast.ConstDecl:
@@ -470,7 +480,17 @@ func (interp *Interpreter) resolveType(te ast.TypeExpr) types.Type {
 	switch t := te.(type) {
 	case *ast.NamedType:
 		if t.Pkg != nil {
-			panic(fmt.Sprintf("qualified types not supported: %s.%s", t.Pkg.Name, t.Name.Name))
+			// Qualified type: pkg.Type
+			pkgPath, ok := interp.importAliases[t.Pkg.Name]
+			if !ok {
+				panic(fmt.Sprintf("unknown package: %s", t.Pkg.Name))
+			}
+			if pkgTypes, ok := interp.packageTypes[pkgPath]; ok {
+				if typ, ok := pkgTypes[t.Name.Name]; ok {
+					return typ
+				}
+			}
+			panic(fmt.Sprintf("undefined type: %s.%s", t.Pkg.Name, t.Name.Name))
 		}
 		if typ, ok := types.PredeclaredTypes[t.Name.Name]; ok {
 			return typ
@@ -1018,10 +1038,12 @@ func (interp *Interpreter) evalBinaryOp(pos token.Pos, op token.Type, lhs, rhs V
 		}
 	}
 
-	// String comparison
+	// String operations
 	if lv, ok := lhs.(*StringVal); ok {
 		if rv, ok := rhs.(*StringVal); ok {
 			switch op {
+			case token.PLUS:
+				return &StringVal{Val: lv.Val + rv.Val}
 			case token.EQ:
 				return &BoolVal{Val: lv.Val == rv.Val}
 			case token.NEQ:
@@ -1190,12 +1212,29 @@ func (interp *Interpreter) evalCall(e *ast.CallExpr) Value {
 		args = append(args, interp.evalExpr(a))
 	}
 
-	return interp.callFunc(fv.Decl, args)
+	callEnv := interp.env
+	var savedTypes map[string]types.Type
+	var savedAliases map[string]string
+	if fv.Env != nil {
+		callEnv = fv.Env
+	}
+	if fv.Types != nil {
+		savedTypes = interp.types
+		savedAliases = interp.importAliases
+		interp.types = fv.Types
+		interp.importAliases = fv.Aliases
+	}
+	result := interp.callFuncInEnv(fv.Decl, args, callEnv)
+	if savedTypes != nil {
+		interp.types = savedTypes
+		interp.importAliases = savedAliases
+	}
+	return result
 }
 
-func (interp *Interpreter) callFunc(decl *ast.FuncDecl, args []Value) Value {
+func (interp *Interpreter) callFuncInEnv(decl *ast.FuncDecl, args []Value, env *Env) Value {
 	savedEnv := interp.env
-	interp.env = newEnv(interp.env)
+	interp.env = newEnv(env)
 	defer func() { interp.env = savedEnv }()
 
 	// Bind parameters

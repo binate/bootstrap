@@ -318,7 +318,7 @@ func main() {
 }
 `
 	c := checkFile(t, src)
-	expectError(t, c, "len argument must be slice or array")
+	expectError(t, c, "len argument must be slice, array, or string")
 }
 
 func TestCheckIncDecNonInteger(t *testing.T) {

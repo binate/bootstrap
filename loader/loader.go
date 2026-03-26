@@ -151,6 +151,20 @@ func (l *Loader) loadPackage(path string, imp *ast.ImportSpec) {
 			l.Errors = append(l.Errors, err.Error())
 			return
 		}
+		// Prepend type and const declarations from .bni into the merged .bn,
+		// so implementation files can reference types/consts declared in .bni.
+		if pkg.BNI != nil {
+			var bniDecls []ast.Decl
+			for _, d := range pkg.BNI.Decls {
+				switch d.(type) {
+				case *ast.TypeDecl, *ast.ConstDecl, *ast.GroupDecl:
+					bniDecls = append(bniDecls, d)
+				}
+			}
+			if len(bniDecls) > 0 {
+				merged.Decls = append(bniDecls, merged.Decls...)
+			}
+		}
 		pkg.Merged = merged
 	}
 
