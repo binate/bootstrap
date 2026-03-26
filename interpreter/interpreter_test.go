@@ -1508,6 +1508,86 @@ func main() {
 	}
 }
 
+func TestAppendNil(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var s []int
+	s = append(s, 42)
+	println(len(s))
+	println(s[0])
+}
+`
+	got := runProgram(t, src)
+	expect := "1\n42\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestLenNilSlice(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var s []int
+	println(len(s))
+}
+`
+	got := runProgram(t, src)
+	if got != "0\n" {
+		t.Errorf("expected %q, got %q", "0\n", got)
+	}
+}
+
+func TestStringSlicing(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var s []char = "hello"
+	var t []char = s[1:4]
+	println(t)
+	println(len(t))
+}
+`
+	got := runProgram(t, src)
+	expect := "ell\n3\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestAppendNilMultiple(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var s []int
+	s = append(s, 1)
+	s = append(s, 2)
+	s = append(s, 3)
+	println(len(s))
+}
+`
+	got := runProgram(t, src)
+	if got != "3\n" {
+		t.Errorf("expected %q, got %q", "3\n", got)
+	}
+}
+
+func TestStringSliceToEnd(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var s []char = "hello"
+	var t []char = s[3:]
+	println(t)
+}
+`
+	got := runProgram(t, src)
+	if got != "lo\n" {
+		t.Errorf("expected %q, got %q", "lo\n", got)
+	}
+}
+
 func TestDistinctTypeIotaGroup(t *testing.T) {
 	src := `package "main"
 

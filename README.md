@@ -146,6 +146,8 @@ The `pkg/bootstrap` package provides OS-level primitives backed by Go in the boo
 | `Close`  | `(fd int) int` | Close a file descriptor |
 | `Exit`   | `(code int)` | Exit the process |
 | `Args`   | `() [][]char` | Program arguments (after `--`) |
+| `Stat`   | `(path []char) int` | File status: 0=not found, 1=file, 2=directory |
+| `ReadDir`| `(path []char) [][]char` | Sorted directory entries (nil on error) |
 | `Itoa`   | `(v int) []char` | Convert int to decimal string |
 | `Concat` | `(a []char, b []char) []char` | Concatenate two strings |
 
