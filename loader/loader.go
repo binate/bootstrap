@@ -151,8 +151,8 @@ func (l *Loader) loadPackage(path string, imp *ast.ImportSpec) {
 			l.Errors = append(l.Errors, err.Error())
 			return
 		}
-		// Prepend type and const declarations from .bni into the merged .bn,
-		// so implementation files can reference types/consts declared in .bni.
+		// Merge .bni into the implementation: prepend type/const declarations
+		// and add any imports the .bni has that the .bn files don't.
 		if pkg.BNI != nil {
 			var bniDecls []ast.Decl
 			for _, d := range pkg.BNI.Decls {
@@ -163,6 +163,20 @@ func (l *Loader) loadPackage(path string, imp *ast.ImportSpec) {
 			}
 			if len(bniDecls) > 0 {
 				merged.Decls = append(bniDecls, merged.Decls...)
+			}
+			// Merge .bni imports so the checker/interpreter can resolve
+			// qualified types used in the prepended declarations.
+			for _, bniImp := range pkg.BNI.Imports {
+				found := false
+				for _, existing := range merged.Imports {
+					if existing.Path.Value == bniImp.Path.Value {
+						found = true
+						break
+					}
+				}
+				if !found {
+					merged.Imports = append(merged.Imports, bniImp)
+				}
 			}
 		}
 		pkg.Merged = merged

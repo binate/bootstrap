@@ -571,3 +571,68 @@ func main() {
 	c := checkFile(t, src)
 	expectNoErrors(t, c)
 }
+
+func TestCheckSelfReferentialStruct(t *testing.T) {
+	src := `package "main"
+
+type Node struct {
+	val  int
+	next @Node
+}
+
+func main() {
+	var n @Node = make(Node)
+	n.val = 42
+	n.next = nil
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+func TestCheckForwardRefStruct(t *testing.T) {
+	src := `package "main"
+
+type Parent struct {
+	child @Child
+}
+
+type Child struct {
+	name []char
+}
+
+func main() {
+	var c @Child = make(Child)
+	c.name = "test"
+	var p @Parent = make(Parent)
+	p.child = c
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+func TestCheckDistinctTypeConstGroup(t *testing.T) {
+	src := `package "main"
+
+type Color int
+
+const (
+	RED   Color = iota
+	GREEN
+	BLUE
+)
+
+func paint(c Color) int {
+	return cast(int, c)
+}
+
+func main() {
+	paint(RED)
+	paint(GREEN)
+	paint(BLUE)
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}

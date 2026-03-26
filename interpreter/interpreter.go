@@ -369,6 +369,9 @@ func (interp *Interpreter) Run(file *ast.File, checker *types.Checker) {
 		interp.importAliases[name] = path
 	}
 
+	// Pre-register type names so self-referential structs can resolve.
+	interp.preRegisterTypes(file.Decls)
+
 	// Register types and functions, evaluate top-level vars/consts
 	interp.env = newEnv(interp.env) // package scope
 
@@ -415,6 +418,9 @@ func (interp *Interpreter) LoadPackage(path string, file *ast.File, checker *typ
 		}
 		interp.importAliases[name] = impPath
 	}
+
+	// Pre-register type names so self-referential structs can resolve.
+	interp.preRegisterTypes(file.Decls)
 
 	// Execute top-level declarations
 	interp.env = newEnv(interp.env) // package scope
@@ -587,6 +593,22 @@ func (interp *Interpreter) execConstDecl(d *ast.ConstDecl) {
 			val = interp.coerce(val, interp.resolveType(d.Type))
 		}
 		interp.env.define(d.Name.Name, val)
+	}
+}
+
+// preRegisterTypes does a first pass over declarations, registering type names
+// as placeholders so self-referential and forward-referenced types can resolve.
+func (interp *Interpreter) preRegisterTypes(decls []ast.Decl) {
+	for _, d := range decls {
+		switch d := d.(type) {
+		case *ast.TypeDecl:
+			if _, ok := interp.types[d.Name.Name]; !ok {
+				// Register placeholder — will be filled in by execTypeDecl
+				interp.types[d.Name.Name] = &types.StructType{Name: d.Name.Name}
+			}
+		case *ast.GroupDecl:
+			interp.preRegisterTypes(d.Decls)
+		}
 	}
 }
 

@@ -1482,3 +1482,65 @@ func main() {
 		t.Errorf("expected %q, got %q", "42\n", got)
 	}
 }
+
+func TestSelfReferentialStruct(t *testing.T) {
+	src := `package "main"
+
+type Node struct {
+	val  int
+	next @Node
+}
+
+func main() {
+	var a @Node = make(Node)
+	a.val = 1
+	var b @Node = make(Node)
+	b.val = 2
+	a.next = b
+	println(a.val)
+	println(a.next.val)
+}
+`
+	got := runProgram(t, src)
+	expect := "1\n2\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestDistinctTypeIotaGroup(t *testing.T) {
+	src := `package "main"
+
+type Color int
+
+const (
+	RED   Color = iota
+	GREEN
+	BLUE
+)
+
+func name(c Color) []char {
+	switch c {
+	case RED:
+		return "red"
+	case GREEN:
+		return "green"
+	case BLUE:
+		return "blue"
+	default:
+		return "unknown"
+	}
+}
+
+func main() {
+	println(name(RED))
+	println(name(GREEN))
+	println(name(BLUE))
+}
+`
+	got := runProgram(t, src)
+	expect := "red\ngreen\nblue\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}

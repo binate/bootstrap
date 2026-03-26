@@ -216,6 +216,44 @@ func (c *Checker) buildScopeFromFile(f *ast.File) *Scope {
 	c.scope = newScope(c.scope) // temp scope on top of universe
 	defer func() { c.scope = savedScope }()
 
+	// Register imports so qualified types (e.g. token.Pos) resolve.
+	for _, imp := range f.Imports {
+		path := imp.Path.Value
+		if len(path) >= 2 {
+			path = path[1 : len(path)-1]
+		}
+		name := imp.Alias
+		if name == "" {
+			parts := strings.Split(path, "/")
+			name = parts[len(parts)-1]
+		}
+		if _, ok := c.packages[path]; ok {
+			c.scope.define(&Symbol{Name: name, Type: nil, Kind: PkgSym, PkgPath: path})
+		}
+	}
+
+	// Pass 1: Pre-register all type names as placeholders so self-referential
+	// and forward-referencing types can resolve during pass 2.
+	for _, d := range f.Decls {
+		switch d := d.(type) {
+		case *ast.TypeDecl:
+			placeholder := &NamedType{Name: d.Name.Name}
+			sym := &Symbol{Name: d.Name.Name, Type: placeholder, Kind: TypeSym}
+			s.define(sym)
+			c.scope.define(sym)
+		case *ast.GroupDecl:
+			for _, inner := range d.Decls {
+				if td, ok := inner.(*ast.TypeDecl); ok {
+					placeholder := &NamedType{Name: td.Name.Name}
+					sym := &Symbol{Name: td.Name.Name, Type: placeholder, Kind: TypeSym}
+					s.define(sym)
+					c.scope.define(sym)
+				}
+			}
+		}
+	}
+
+	// Pass 2: Resolve all declarations.
 	for _, d := range f.Decls {
 		switch d := d.(type) {
 		case *ast.FuncDecl:
@@ -230,23 +268,52 @@ func (c *Checker) buildScopeFromFile(f *ast.File) *Scope {
 			}
 			s.define(&Symbol{Name: d.Name.Name, Type: typ, Kind: ConstSym})
 		case *ast.TypeDecl:
-			typ := c.resolveTypeExpr(d.Type)
-			sym := &Symbol{Name: d.Name.Name, Type: typ, Kind: TypeSym}
-			s.define(sym)
-			// Also add to the resolution scope so later declarations
-			// in this file can reference this type.
-			c.scope.define(sym)
+			resolved := c.resolveTypeExpr(d.Type)
+			// Update the placeholder from pass 1.
+			if sym := s.symbols[d.Name.Name]; sym != nil {
+				if named, ok := sym.Type.(*NamedType); ok {
+					if d.Assign {
+						// Alias: replace placeholder with AliasType.
+						alias := &AliasType{Name: d.Name.Name, Target: resolved}
+						sym.Type = alias
+						if scopeSym := c.scope.symbols[d.Name.Name]; scopeSym != nil {
+							scopeSym.Type = alias
+						}
+					} else {
+						named.Underlying_ = resolved
+					}
+				}
+			}
 		case *ast.GroupDecl:
+			var groupType Type
 			for _, inner := range d.Decls {
 				switch inner := inner.(type) {
 				case *ast.ConstDecl:
 					var typ Type
 					if inner.Type != nil {
 						typ = c.resolveTypeExpr(inner.Type)
+						groupType = typ // remember for subsequent constants
+					} else if groupType != nil {
+						typ = groupType // inherit type in iota group
 					} else {
 						typ = Typ_int
 					}
 					s.define(&Symbol{Name: inner.Name.Name, Type: typ, Kind: ConstSym})
+				case *ast.TypeDecl:
+					resolved := c.resolveTypeExpr(inner.Type)
+					if sym := s.symbols[inner.Name.Name]; sym != nil {
+						if named, ok := sym.Type.(*NamedType); ok {
+							if inner.Assign {
+								alias := &AliasType{Name: inner.Name.Name, Target: resolved}
+								sym.Type = alias
+								if scopeSym := c.scope.symbols[inner.Name.Name]; scopeSym != nil {
+									scopeSym.Type = alias
+								}
+							} else {
+								named.Underlying_ = resolved
+							}
+						}
+					}
 				}
 			}
 		}
@@ -319,6 +386,10 @@ func (c *Checker) Check(file *ast.File) {
 }
 
 func (c *Checker) collectDecls(decls []ast.Decl) {
+	// Pre-register all type names so self-referential and forward-referencing
+	// types can resolve during the main collection pass.
+	c.preRegisterTypeNames(decls)
+
 	for _, d := range decls {
 		switch d := d.(type) {
 		case *ast.FuncDecl:
@@ -354,20 +425,48 @@ func (c *Checker) collectDecls(decls []ast.Decl) {
 	}
 }
 
+// preRegisterTypeNames registers all type names as NamedType placeholders
+// so self-referential and forward-referenced types can resolve.
+func (c *Checker) preRegisterTypeNames(decls []ast.Decl) {
+	for _, d := range decls {
+		switch d := d.(type) {
+		case *ast.TypeDecl:
+			if c.scope.symbols[d.Name.Name] == nil {
+				placeholder := &NamedType{Name: d.Name.Name}
+				c.scope.define(&Symbol{Name: d.Name.Name, Type: placeholder, Kind: TypeSym})
+			}
+		case *ast.GroupDecl:
+			c.preRegisterTypeNames(d.Decls)
+		}
+	}
+}
+
 func (c *Checker) collectTypeDecl(d *ast.TypeDecl) {
 	if d.Assign {
-		// Type alias
+		// Type alias — overwrite placeholder
 		target := c.resolveTypeExpr(d.Type)
 		alias := &AliasType{Name: d.Name.Name, Target: target}
 		c.scope.define(&Symbol{Name: d.Name.Name, Type: alias, Kind: TypeSym})
 	} else if st, ok := d.Type.(*ast.StructType); ok {
-		// Named struct
+		// Named struct — update the placeholder's underlying
 		structType := c.resolveStructType(st)
 		structType.Name = d.Name.Name
+		if sym := c.scope.symbols[d.Name.Name]; sym != nil {
+			if named, ok := sym.Type.(*NamedType); ok {
+				named.Underlying_ = structType
+				return
+			}
+		}
 		c.scope.define(&Symbol{Name: d.Name.Name, Type: structType, Kind: TypeSym})
 	} else {
-		// Distinct type
+		// Distinct type — update the placeholder's underlying
 		underlying := c.resolveTypeExpr(d.Type)
+		if sym := c.scope.symbols[d.Name.Name]; sym != nil {
+			if named, ok := sym.Type.(*NamedType); ok {
+				named.Underlying_ = underlying
+				return
+			}
+		}
 		named := &NamedType{Name: d.Name.Name, Underlying_: underlying}
 		c.scope.define(&Symbol{Name: d.Name.Name, Type: named, Kind: TypeSym})
 	}
