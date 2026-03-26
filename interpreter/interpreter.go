@@ -173,6 +173,14 @@ func (interp *Interpreter) registerBuiltins() {
 			}
 			sv, ok := args[0].(*SliceVal)
 			if !ok {
+				// Handle nil append: append(nil, x) creates a new slice
+				if _, isNil := args[0].(*NilVal); isNil {
+					newElems := make([]Value, 0, len(args)-1)
+					for _, a := range args[1:] {
+						newElems = append(newElems, a)
+					}
+					return &SliceVal{Elems: newElems}
+				}
 				panic(fmt.Sprintf("append: first argument must be a slice, got %T", args[0]))
 			}
 			newElems := make([]Value, len(sv.Elems), len(sv.Elems)+len(args)-1)
@@ -318,6 +326,46 @@ func (interp *Interpreter) registerBootstrapPackage() {
 				return &IntVal{Val: int64(err), Typ: types.Typ_int}
 			}
 			return &IntVal{Val: 0, Typ: types.Typ_int}
+		},
+	})
+	// ReadDir: ReadDir(path []char) [][]char — returns sorted filenames in directory (nil on error)
+	pkg.define("ReadDir", &BuiltinFuncVal{
+		Name: "ReadDir",
+		Fn: func(args []Value) Value {
+			if len(args) < 1 {
+				panic("ReadDir requires 1 argument: path")
+			}
+			dir := stringToGo(args[0])
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				return &NilVal{}
+			}
+			elems := make([]Value, 0, len(entries))
+			for _, e := range entries {
+				elems = append(elems, goToCharSlice(e.Name()))
+			}
+			return &SliceVal{
+				Elems: elems,
+				Typ:   &types.SliceType{Elem: types.Typ_string},
+			}
+		},
+	})
+	// Stat: Stat(path []char) int — returns 0=not found, 1=file, 2=directory
+	pkg.define("Stat", &BuiltinFuncVal{
+		Name: "Stat",
+		Fn: func(args []Value) Value {
+			if len(args) < 1 {
+				panic("Stat requires 1 argument: path")
+			}
+			path := stringToGo(args[0])
+			info, err := os.Stat(path)
+			if err != nil {
+				return &IntVal{Val: 0, Typ: types.Typ_int}
+			}
+			if info.IsDir() {
+				return &IntVal{Val: 2, Typ: types.Typ_int}
+			}
+			return &IntVal{Val: 1, Typ: types.Typ_int}
 		},
 	})
 	// Args: Args() [][]char — returns program arguments (after -- separator)
@@ -1396,6 +1444,23 @@ func (interp *Interpreter) evalSlice(e *ast.SliceExpr) Value {
 	x := interp.evalExpr(e.X)
 	var elems []Value
 
+	// Handle StringVal slicing (produces []char SliceVal)
+	if sv, ok := x.(*StringVal); ok {
+		lo := 0
+		hi := len(sv.Val)
+		if e.Lo != nil {
+			lo = int(interp.evalExpr(e.Lo).(*IntVal).Val)
+		}
+		if e.Hi != nil {
+			hi = int(interp.evalExpr(e.Hi).(*IntVal).Val)
+		}
+		sliced := make([]Value, hi-lo)
+		for i := lo; i < hi; i++ {
+			sliced[i-lo] = &IntVal{Val: int64(sv.Val[i]), Typ: types.Typ_uint8}
+		}
+		return &SliceVal{Elems: sliced, Typ: &types.SliceType{Elem: types.Typ_char}}
+	}
+
 	switch c := x.(type) {
 	case *SliceVal:
 		elems = c.Elems
@@ -1607,6 +1672,8 @@ func (interp *Interpreter) evalLen(e *ast.BuiltinCall) Value {
 		return &IntVal{Val: int64(len(v.Elems)), Typ: types.Typ_int}
 	case *StringVal:
 		return &IntVal{Val: int64(len(v.Val)), Typ: types.Typ_int}
+	case *NilVal:
+		return &IntVal{Val: 0, Typ: types.Typ_int}
 	default:
 		panic(fmt.Sprintf("len: unsupported type %T", arg))
 	}
