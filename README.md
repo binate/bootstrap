@@ -90,7 +90,7 @@ for n > 0 { ... }                   // while-style
 for { ... }                          // infinite
 for v in collection { ... }         // iteration
 for i, v in collection { ... }      // with index
-switch x { case 1: ... default: ... }
+switch x { case 1: ... case 2, 3: ... default: ... }
 break, continue, return
 ```
 
