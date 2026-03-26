@@ -39,6 +39,7 @@ type Interpreter struct {
 	packages      map[string]*Env   // package path -> env
 	importAliases map[string]string // local name -> package path
 	progArgs      []string          // program arguments (from -- separator)
+	iota          int               // current iota value in grouped const (-1 = not in const group)
 }
 
 // Env represents a variable environment (frame).
@@ -107,6 +108,7 @@ func New() *Interpreter {
 		nextFD:        3,
 		packages:      make(map[string]*Env),
 		importAliases: make(map[string]string),
+		iota:          -1,
 	}
 	interp.env = newEnv(nil)
 	interp.registerBuiltins()
@@ -369,8 +371,28 @@ func (interp *Interpreter) execTopLevelDecl(d ast.Decl) {
 	case *ast.TypeDecl:
 		interp.execTypeDecl(d)
 	case *ast.GroupDecl:
+		// Check if this is a const group (enable iota)
+		hasConst := false
 		for _, inner := range d.Decls {
-			interp.execTopLevelDecl(inner)
+			if _, ok := inner.(*ast.ConstDecl); ok {
+				hasConst = true
+				break
+			}
+		}
+		if hasConst {
+			savedIota := interp.iota
+			interp.iota = 0
+			for _, inner := range d.Decls {
+				interp.execTopLevelDecl(inner)
+				if _, ok := inner.(*ast.ConstDecl); ok {
+					interp.iota++
+				}
+			}
+			interp.iota = savedIota
+		} else {
+			for _, inner := range d.Decls {
+				interp.execTopLevelDecl(inner)
+			}
 		}
 	}
 }
@@ -462,6 +484,13 @@ func (interp *Interpreter) execVarDecl(d *ast.VarDecl) {
 func (interp *Interpreter) execConstDecl(d *ast.ConstDecl) {
 	if d.Value != nil {
 		val := interp.evalExpr(d.Value)
+		if d.Type != nil {
+			val = interp.coerce(val, interp.resolveType(d.Type))
+		}
+		interp.env.define(d.Name.Name, val)
+	} else if interp.iota >= 0 {
+		// Bare name in grouped const — use current iota value
+		val := Value(&IntVal{Val: int64(interp.iota), Typ: types.Typ_int})
 		if d.Type != nil {
 			val = interp.coerce(val, interp.resolveType(d.Type))
 		}
@@ -880,6 +909,9 @@ func (interp *Interpreter) evalCharLit(e *ast.CharLit) Value {
 }
 
 func (interp *Interpreter) evalIdent(e *ast.Ident) Value {
+	if e.Name == "iota" && interp.iota >= 0 {
+		return &IntVal{Val: int64(interp.iota), Typ: types.Typ_int}
+	}
 	v, ok := interp.env.get(e.Name)
 	if !ok {
 		panic(fmt.Sprintf("undefined variable: %s", e.Name))
@@ -1164,6 +1196,11 @@ func (interp *Interpreter) evalIndex(e *ast.IndexExpr) Value {
 			runtimePanic(e.Index.Pos(), "index out of bounds: %d (len %d)", i, len(c.Elems))
 		}
 		return c.Elems[i]
+	case *StringVal:
+		if i < 0 || int(i) >= len(c.Val) {
+			runtimePanic(e.Index.Pos(), "index out of bounds: %d (len %d)", i, len(c.Val))
+		}
+		return &CharVal{Val: rune(c.Val[i])}
 	case *PointerVal:
 		// Pointer arithmetic — not implemented in bootstrap
 		panic("pointer indexing not supported")

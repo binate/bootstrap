@@ -707,3 +707,307 @@ func main() {
 		t.Errorf("expected %q, got %q", expect, got)
 	}
 }
+
+func TestIncDec(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var x int = 5
+	x++
+	println(x)
+	x--
+	x--
+	println(x)
+}
+`
+	got := runProgram(t, src)
+	if got != "6\n4\n" {
+		t.Errorf("expected %q, got %q", "6\n4\n", got)
+	}
+}
+
+func TestForIn(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var arr [3]int = [3]int{10, 20, 30}
+	var sum int = 0
+	for v in arr {
+		sum = sum + v
+	}
+	println(sum)
+}
+`
+	got := runProgram(t, src)
+	if got != "60\n" {
+		t.Errorf("expected %q, got %q", "60\n", got)
+	}
+}
+
+func TestForInSlice(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	s := make([]int, 3)
+	s[0] = 1
+	s[1] = 2
+	s[2] = 3
+	for v in s {
+		print(v)
+		print(" ")
+	}
+	println("")
+}
+`
+	got := runProgram(t, src)
+	if got != "1 2 3 \n" {
+		t.Errorf("expected %q, got %q", "1 2 3 \n", got)
+	}
+}
+
+func TestForInWithIndex(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var arr [3]int = [3]int{10, 20, 30}
+	for i, v in arr {
+		println(i, v)
+	}
+}
+`
+	got := runProgram(t, src)
+	expect := "0 10\n1 20\n2 30\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestCharLiteral(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var c char = 'A'
+	println(cast(int, c))
+	var newline char = '\n'
+	println(cast(int, newline))
+}
+`
+	got := runProgram(t, src)
+	if got != "65\n10\n" {
+		t.Errorf("expected %q, got %q", "65\n10\n", got)
+	}
+}
+
+func TestIotaConst(t *testing.T) {
+	src := `package "main"
+
+const (
+	A int = iota
+	B
+	C
+)
+
+func main() {
+	println(A)
+	println(B)
+	println(C)
+}
+`
+	got := runProgram(t, src)
+	if got != "0\n1\n2\n" {
+		t.Errorf("expected %q, got %q", "0\n1\n2\n", got)
+	}
+}
+
+func TestMultiReturnShortDecl(t *testing.T) {
+	src := `package "main"
+
+func divmod(a int, b int) (int, int) {
+	return a / b, a % b
+}
+
+func main() {
+	q, r := divmod(17, 5)
+	println(q, r)
+}
+`
+	got := runProgram(t, src)
+	if got != "3 2\n" {
+		t.Errorf("expected %q, got %q", "3 2\n", got)
+	}
+}
+
+func TestStringIndex(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	s := "hello"
+	println(cast(int, s[0]))
+	println(cast(int, s[4]))
+}
+`
+	got := runProgram(t, src)
+	if got != "104\n111\n" {
+		t.Errorf("expected %q, got %q", "104\n111\n", got)
+	}
+}
+
+func TestManagedSlice(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	s := make([]int, 5)
+	for i := 0; i < 5; i++ {
+		s[i] = i * i
+	}
+	println(len(s))
+	println(s[3])
+}
+`
+	got := runProgram(t, src)
+	if got != "5\n9\n" {
+		t.Errorf("expected %q, got %q", "5\n9\n", got)
+	}
+}
+
+func TestRuntimeDivisionByZero(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var x int = 10
+	var y int = 0
+	println(x / y)
+}
+`
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic for division by zero")
+		}
+		re, ok := r.(*RuntimeError)
+		if !ok {
+			t.Fatalf("expected RuntimeError, got %T: %v", r, r)
+		}
+		if !strings.Contains(re.Msg, "division by zero") {
+			t.Errorf("expected 'division by zero' in error, got %q", re.Msg)
+		}
+	}()
+	runProgram(t, src)
+}
+
+func TestRuntimeIndexOutOfBounds(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var arr [3]int = [3]int{1, 2, 3}
+	println(arr[5])
+}
+`
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic for index out of bounds")
+		}
+		re, ok := r.(*RuntimeError)
+		if !ok {
+			t.Fatalf("expected RuntimeError, got %T: %v", r, r)
+		}
+		if !strings.Contains(re.Msg, "index out of bounds") {
+			t.Errorf("expected 'index out of bounds' in error, got %q", re.Msg)
+		}
+	}()
+	runProgram(t, src)
+}
+
+func TestRuntimeNilDeref(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var p *int = nil
+	println(*p)
+}
+`
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic for nil deref")
+		}
+		re, ok := r.(*RuntimeError)
+		if !ok {
+			t.Fatalf("expected RuntimeError, got %T: %v", r, r)
+		}
+		if !strings.Contains(re.Msg, "nil pointer dereference") {
+			t.Errorf("expected 'nil pointer dereference' in error, got %q", re.Msg)
+		}
+	}()
+	runProgram(t, src)
+}
+
+func TestNestedForLoops(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var sum int = 0
+	for i := 0; i < 3; i++ {
+		for j := 0; j < 3; j++ {
+			sum = sum + i*3 + j
+		}
+	}
+	println(sum)
+}
+`
+	got := runProgram(t, src)
+	// sum of 0..8 = 36
+	if got != "36\n" {
+		t.Errorf("expected %q, got %q", "36\n", got)
+	}
+}
+
+func TestDistinctType(t *testing.T) {
+	src := `package "main"
+
+type Meters int
+
+func main() {
+	var d Meters = cast(Meters, 100)
+	println(cast(int, d))
+}
+`
+	got := runProgram(t, src)
+	if got != "100\n" {
+		t.Errorf("expected %q, got %q", "100\n", got)
+	}
+}
+
+func TestTypeAlias(t *testing.T) {
+	src := `package "main"
+
+type MyInt = int
+
+func main() {
+	var x MyInt = 42
+	println(x)
+}
+`
+	got := runProgram(t, src)
+	if got != "42\n" {
+		t.Errorf("expected %q, got %q", "42\n", got)
+	}
+}
+
+func TestPackageImport(t *testing.T) {
+	src := `package "main"
+
+import "pkg/bootstrap"
+
+func main() {
+	s := bootstrap.string(42)
+	println(s)
+	println(bootstrap.STDOUT)
+}
+`
+	got := runProgram(t, src)
+	if got != "42\n1\n" {
+		t.Errorf("expected %q, got %q", "42\n1\n", got)
+	}
+}

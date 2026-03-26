@@ -21,6 +21,7 @@ type Checker struct {
 	scope    *Scope
 	funcRet  []Type            // expected return types of current function
 	packages map[string]*Scope // imported package scopes
+	iota     int               // current iota value in grouped const (-1 = not in const group)
 }
 
 // CheckError represents a type-checking error.
@@ -80,6 +81,7 @@ func (s *Scope) lookup(name string) *Symbol {
 func NewChecker() *Checker {
 	c := &Checker{
 		packages: make(map[string]*Scope),
+		iota:     -1,
 	}
 	c.scope = c.universeScope()
 	bootstrapScope := c.loadBNI(bootstrapBNI, "pkg/bootstrap.bni")
@@ -264,6 +266,15 @@ func (c *Checker) collectDecls(decls []ast.Decl) {
 				c.scope.define(&Symbol{Name: d.Name.Name, Type: typ, Kind: ConstSym})
 			}
 		case *ast.GroupDecl:
+			// For grouped consts with iota, register all names in pass 1
+			for _, inner := range d.Decls {
+				if cd, ok := inner.(*ast.ConstDecl); ok {
+					if cd.Type != nil {
+						typ := c.resolveTypeExpr(cd.Type)
+						c.scope.define(&Symbol{Name: cd.Name.Name, Type: typ, Kind: ConstSym})
+					}
+				}
+			}
 			c.collectDecls(d.Decls)
 		}
 	}
@@ -298,7 +309,7 @@ func (c *Checker) checkDecls(decls []ast.Decl) {
 		case *ast.ConstDecl:
 			c.checkConstDecl(d)
 		case *ast.GroupDecl:
-			c.checkDecls(d.Decls)
+			c.checkGroupDecl(d)
 		case *ast.TypeDecl:
 			// Already handled in pass 1
 		}
@@ -431,9 +442,44 @@ func (c *Checker) checkVarDecl(d *ast.VarDecl) {
 	}
 }
 
+func (c *Checker) checkGroupDecl(d *ast.GroupDecl) {
+	// Check if this is a const group (enable iota)
+	hasConst := false
+	for _, inner := range d.Decls {
+		if _, ok := inner.(*ast.ConstDecl); ok {
+			hasConst = true
+			break
+		}
+	}
+	if hasConst {
+		savedIota := c.iota
+		c.iota = 0
+		for _, inner := range d.Decls {
+			switch inner := inner.(type) {
+			case *ast.ConstDecl:
+				c.checkConstDecl(inner)
+				c.iota++
+			default:
+				c.checkDecls([]ast.Decl{inner})
+			}
+		}
+		c.iota = savedIota
+	} else {
+		c.checkDecls(d.Decls)
+	}
+}
+
 func (c *Checker) checkConstDecl(d *ast.ConstDecl) {
 	if d.Value == nil {
-		// Bare name in grouped const (repeat) — not fully implemented
+		// Bare name in grouped const — iota continues
+		if c.iota >= 0 {
+			if d.Type != nil {
+				typ := c.resolveTypeExpr(d.Type)
+				c.scope.define(&Symbol{Name: d.Name.Name, Type: typ, Kind: ConstSym})
+			} else {
+				c.scope.define(&Symbol{Name: d.Name.Name, Type: Typ_untypedInt, Kind: ConstSym})
+			}
+		}
 		return
 	}
 	valType := c.checkExpr(d.Value)
@@ -712,6 +758,9 @@ func (c *Checker) checkExpr(e ast.Expr) Type {
 }
 
 func (c *Checker) checkIdent(e *ast.Ident) Type {
+	if e.Name == "iota" && c.iota >= 0 {
+		return Typ_untypedInt
+	}
 	sym := c.scope.lookup(e.Name)
 	if sym == nil {
 		c.errorf(e.Pos(), "undefined: %s", e.Name)
@@ -887,6 +936,9 @@ func (c *Checker) checkIndexExpr(e *ast.IndexExpr) Type {
 	case *PointerType:
 		// Pointer indexing — like C: p[i]
 		return t.Elem
+	case *StringLitType:
+		// String indexing returns a byte (char)
+		return Typ_char
 	default:
 		c.errorf(e.X.Pos(), "cannot index %s", xt)
 		return Typ_void
