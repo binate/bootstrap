@@ -140,8 +140,13 @@ func runTests(root string, testPkgs []string) {
 			if !ok {
 				continue
 			}
-			if strings.HasPrefix(fd.Name.Name, "Test") && len(fd.Params) == 0 && fd.Body != nil {
+			if !strings.HasPrefix(fd.Name.Name, "Test") || fd.Body == nil {
+				continue
+			}
+			if len(fd.Params) == 0 && isTestResultReturn(fd) {
 				testNames = append(testNames, fd.Name.Name)
+			} else {
+				fmt.Fprintf(os.Stderr, "warning: %s has Test prefix but wrong signature (want TestXxx() testing.TestResult)\n", fd.Name.Name)
 			}
 		}
 
@@ -178,6 +183,30 @@ func runTests(root string, testPkgs []string) {
 		os.Exit(1)
 	}
 	fmt.Printf("ok\t%d passed\n", passed)
+}
+
+// isTestResultReturn checks whether a function has a single return type
+// that is testing.TestResult (or equivalently []char).
+func isTestResultReturn(fd *ast.FuncDecl) bool {
+	if len(fd.Results) != 1 {
+		return false
+	}
+	r := fd.Results[0]
+	// Accept testing.TestResult (qualified named type)
+	if nt, ok := r.(*ast.NamedType); ok {
+		if nt.Pkg != nil && nt.Pkg.Name == "testing" && nt.Name.Name == "TestResult" {
+			return true
+		}
+	}
+	// Accept []char directly
+	if st, ok := r.(*ast.SliceType); ok {
+		if nt, ok := st.Elem.(*ast.NamedType); ok {
+			if nt.Pkg == nil && nt.Name.Name == "char" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // runProgram runs a Binate program (the normal non-test mode).

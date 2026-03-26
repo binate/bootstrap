@@ -164,8 +164,10 @@ go run main.go -test -root myproject pkg/foo pkg/bar
 - Test files are named `*_test.bn` and live in the package directory alongside regular `.bn` files.
 - Test files use the same `package` declaration as the package they test (same-package tests). They can access all symbols, including unexported helpers.
 - Test files are **excluded** from normal builds. They are only included when the package is specified as a `-test` target.
-- Test functions are named `TestXxx()` — no parameters, no return value. They are discovered and run automatically.
-- Tests signal failure by calling `panic("message")`. The test runner catches panics and reports them.
+- Test functions are named `TestXxx() testing.TestResult` — no parameters, returns `testing.TestResult` (alias for `[]char`). They are discovered and run automatically.
+- Tests signal failure by returning a non-empty string (the failure message). Empty string means pass.
+- Functions named `TestXxx` with the wrong signature produce a warning and are skipped.
+- Test files must `import "pkg/builtin/testing"` for the `TestResult` type.
 
 ### Example
 
@@ -173,10 +175,13 @@ go run main.go -test -root myproject pkg/foo pkg/bar
 ```
 package "pkg/foo"
 
-func TestAdd() {
+import "pkg/builtin/testing"
+
+func TestAdd() testing.TestResult {
     if add(2, 3) != 5 {
-        panic("add(2, 3) != 5")
+        return "add(2, 3) != 5"
     }
+    return ""
 }
 ```
 

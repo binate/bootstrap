@@ -439,19 +439,10 @@ func (interp *Interpreter) LoadPackage(path string, file *ast.File, checker *typ
 	interp.importAliases = savedAliases
 }
 
-// RunTestFunc calls a named no-arg function in a loaded package's scope.
-// Returns "" on success, or the panic/error message on failure.
+// RunTestFunc calls a named test function in a loaded package's scope.
+// The test function must return a TestResult ([]char): empty means pass,
+// non-empty is the failure message.
 func (interp *Interpreter) RunTestFunc(pkgPath string, funcName string) (errMsg string) {
-	defer func() {
-		if r := recover(); r != nil {
-			if re, ok := r.(*RuntimeError); ok {
-				errMsg = re.Error()
-			} else {
-				errMsg = fmt.Sprintf("%v", r)
-			}
-		}
-	}()
-
 	env := interp.packages[pkgPath]
 	if env == nil {
 		return fmt.Sprintf("package %s not loaded", pkgPath)
@@ -481,8 +472,36 @@ func (interp *Interpreter) RunTestFunc(pkgPath string, funcName string) (errMsg 
 		interp.importAliases = savedAliases
 	}()
 
-	interp.callFuncInEnv(fv.Decl, nil, fv.Env)
-	return ""
+	result := interp.callFuncInEnv(fv.Decl, nil, fv.Env)
+	return valueToTestResult(result)
+}
+
+// valueToTestResult extracts a failure message from a test function's return value.
+// Returns "" for pass (nil, empty string, empty slice), or the message string for failure.
+func valueToTestResult(v Value) string {
+	if v == nil {
+		return ""
+	}
+	switch val := v.(type) {
+	case *NilVal:
+		return ""
+	case *StringVal:
+		return val.Val
+	case *SliceVal:
+		if len(val.Elems) == 0 {
+			return ""
+		}
+		// Convert []char to string
+		buf := make([]byte, len(val.Elems))
+		for i, e := range val.Elems {
+			if iv, ok := e.(*IntVal); ok {
+				buf[i] = byte(iv.Val)
+			}
+		}
+		return string(buf)
+	default:
+		return ""
+	}
 }
 
 func (interp *Interpreter) execTopLevelDecl(d ast.Decl) {
