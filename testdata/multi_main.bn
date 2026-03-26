@@ -1,0 +1,7 @@
+package "main"
+
+func main() {
+    var x int = add(3, 4)
+    var y int = mul(x, 2)
+    println(y)
+}
