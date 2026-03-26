@@ -261,7 +261,8 @@ var PredeclaredTypes = map[string]Type{
 	"uint32": Typ_uint32,
 	"uint64": Typ_uint64,
 	"byte":   Typ_byte,
-	"any":    nil, // placeholder — not a real type in bootstrap
+	"string": Typ_string, // bootstrap convenience — maps to StringLitType
+	"any":    nil,        // placeholder — not a real type in bootstrap
 }
 
 // ============================================================

@@ -20,6 +20,10 @@ type Parser struct {
 	// Set when parsing conditions in if/for/switch where { would be
 	// ambiguous with the block body.
 	noCompositeLit bool
+
+	// interfaceFile is true when parsing a .bni interface file.
+	// Function declarations don't require bodies.
+	interfaceFile bool
 }
 
 // Error represents a parse error with position.
@@ -38,6 +42,17 @@ func New(src []byte, file string) *Parser {
 		lex: lexer.New(src, file),
 	}
 	p.next() // prime the first token
+	return p
+}
+
+// NewInterface creates a new parser for a .bni interface file.
+// In interface mode, function declarations don't require bodies.
+func NewInterface(src []byte, file string) *Parser {
+	p := &Parser{
+		lex:           lexer.New(src, file),
+		interfaceFile: true,
+	}
+	p.next()
 	return p
 }
 
@@ -751,12 +766,17 @@ func (p *Parser) parseFuncDecl() *ast.FuncDecl {
 		p.next()
 		results = p.parseTypeList()
 		p.expect(token.RPAREN)
-	} else if p.tok.Type != token.LBRACE {
+	} else if p.tok.Type != token.LBRACE && p.tok.Type != token.SEMICOLON && p.tok.Type != token.EOF {
 		// Single return type
 		results = append(results, p.parseType())
 	}
 
-	body := p.parseBlock()
+	var body *ast.Block
+	if p.interfaceFile {
+		// In .bni files, function declarations have no body
+	} else {
+		body = p.parseBlock()
+	}
 	return &ast.FuncDecl{
 		FuncPos: pos,
 		Name:    name,

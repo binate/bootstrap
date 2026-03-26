@@ -1,0 +1,27 @@
+package "pkg/bootstrap"
+
+// File I/O
+func open(path string, flags int) int
+func read(fd int, buf []uint8, n int) int
+func write(fd int, buf []uint8, n int) int
+func close(fd int) int
+
+// Process
+func exit(code int)
+func args() []string
+
+// Conversions (variadic — accepts any single argument)
+func string(v int) string
+
+// File open flags
+const O_RDONLY int = 0
+const O_WRONLY int = 1
+const O_RDWR int = 2
+const O_CREATE int = 64
+const O_TRUNC int = 512
+const O_APPEND int = 1024
+
+// Standard file descriptors
+const STDIN int = 0
+const STDOUT int = 1
+const STDERR int = 2

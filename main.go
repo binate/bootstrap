@@ -12,11 +12,29 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: binate <file.bn> [file2.bn ...]\n")
+		fmt.Fprintf(os.Stderr, "usage: binate <file.bn> [file2.bn ...] [-- args...]\n")
 		os.Exit(1)
 	}
 
-	filenames := os.Args[1:]
+	// Split args at "--": files before, program args after
+	var filenames []string
+	progArgs := []string{} // args passed to the Binate program
+	seenSep := false
+	for _, arg := range os.Args[1:] {
+		if arg == "--" {
+			seenSep = true
+			continue
+		}
+		if seenSep {
+			progArgs = append(progArgs, arg)
+		} else {
+			filenames = append(filenames, arg)
+		}
+	}
+	if len(filenames) == 0 {
+		fmt.Fprintf(os.Stderr, "usage: binate <file.bn> [file2.bn ...] [-- args...]\n")
+		os.Exit(1)
+	}
 
 	// Parse all files
 	var files []*ast.File
@@ -60,6 +78,7 @@ func main() {
 
 	// Run
 	interp := interpreter.New()
+	interp.SetArgs(progArgs)
 	runWithRecovery(interp, merged, c)
 }
 

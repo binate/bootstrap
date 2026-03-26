@@ -38,6 +38,7 @@ type Interpreter struct {
 	nextFD        int               // next file descriptor to allocate
 	packages      map[string]*Env   // package path -> env
 	importAliases map[string]string // local name -> package path
+	progArgs      []string          // program arguments (from -- separator)
 }
 
 // Env represents a variable environment (frame).
@@ -116,6 +117,11 @@ func New() *Interpreter {
 // SetStdout captures output to a string builder instead of os.Stdout.
 func (interp *Interpreter) SetStdout(buf *strings.Builder) {
 	interp.stdout = buf
+}
+
+// SetArgs sets the program arguments returned by bootstrap.args().
+func (interp *Interpreter) SetArgs(args []string) {
+	interp.progArgs = args
 }
 
 func (interp *Interpreter) print(s string) {
@@ -290,18 +296,12 @@ func (interp *Interpreter) registerBootstrapPackage() {
 			return &IntVal{Val: 0, Typ: types.Typ_int}
 		},
 	})
-	// args: args() []string — returns command-line arguments (excluding program name)
+	// args: args() []string — returns program arguments (after -- separator)
 	pkg.define("args", &BuiltinFuncVal{
 		Name: "args",
 		Fn: func(args []Value) Value {
-			// Skip os.Args[0] (the binary) and os.Args[1] (the .bn file)
-			osArgs := os.Args
-			start := 2
-			if start > len(osArgs) {
-				start = len(osArgs)
-			}
-			elems := make([]Value, len(osArgs)-start)
-			for i, a := range osArgs[start:] {
+			elems := make([]Value, len(interp.progArgs))
+			for i, a := range interp.progArgs {
 				elems[i] = &StringVal{Val: a}
 			}
 			return &SliceVal{

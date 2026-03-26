@@ -1,13 +1,18 @@
 package types
 
 import (
+	_ "embed"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/binate/bootstrap/ast"
+	"github.com/binate/bootstrap/parser"
 	"github.com/binate/bootstrap/token"
 )
+
+//go:embed bootstrap.bni
+var bootstrapBNI []byte
 
 // Checker performs type checking on an AST.
 type Checker struct {
@@ -77,7 +82,12 @@ func NewChecker() *Checker {
 		packages: make(map[string]*Scope),
 	}
 	c.scope = c.universeScope()
-	c.packages["pkg/bootstrap"] = c.bootstrapPackageScope()
+	bootstrapScope := c.loadBNI(bootstrapBNI, "pkg/bootstrap.bni")
+	// The string function is variadic (accepts any type) — override with variadic marker.
+	if sym := bootstrapScope.symbols["string"]; sym != nil {
+		sym.Type = &FuncType{} // empty params = variadic marker
+	}
+	c.packages["pkg/bootstrap"] = bootstrapScope
 	return c
 }
 
@@ -115,53 +125,73 @@ func (c *Checker) universeScope() *Scope {
 	return s
 }
 
-// bootstrapPackageScope creates the scope for the "bootstrap" package.
-func (c *Checker) bootstrapPackageScope() *Scope {
+// loadBNI parses a .bni interface file and builds a package scope from it.
+func (c *Checker) loadBNI(src []byte, filename string) *Scope {
+	p := parser.NewInterface(src, filename)
+	f := p.ParseFile()
+	if len(p.Errors()) > 0 {
+		for _, e := range p.Errors() {
+			c.errorf(token.Pos{}, "parsing %s: %s", filename, e.Msg)
+		}
+		return newScope(nil)
+	}
+
 	s := newScope(nil)
-	variadicType := &FuncType{} // variadic marker
 
-	// I/O
-	s.define(&Symbol{Name: "open", Type: &FuncType{
-		Params:  []*Param{{Name: "path", Type: Typ_string}, {Name: "flags", Type: Typ_int}},
-		Results: []Type{Typ_int},
-	}, Kind: FuncSym})
-	s.define(&Symbol{Name: "read", Type: &FuncType{
-		Params:  []*Param{{Name: "fd", Type: Typ_int}, {Name: "buf", Type: &SliceType{Elem: Typ_uint8}}, {Name: "n", Type: Typ_int}},
-		Results: []Type{Typ_int},
-	}, Kind: FuncSym})
-	s.define(&Symbol{Name: "write", Type: &FuncType{
-		Params:  []*Param{{Name: "fd", Type: Typ_int}, {Name: "buf", Type: &SliceType{Elem: Typ_uint8}}, {Name: "n", Type: Typ_int}},
-		Results: []Type{Typ_int},
-	}, Kind: FuncSym})
-	s.define(&Symbol{Name: "close", Type: &FuncType{
-		Params:  []*Param{{Name: "fd", Type: Typ_int}},
-		Results: []Type{Typ_int},
-	}, Kind: FuncSym})
+	// Set up a temporary scope for resolving types in declarations.
+	// We need the universe scope (predeclared types) to be reachable.
+	savedScope := c.scope
+	c.scope = newScope(c.scope) // temp scope on top of universe
+	defer func() { c.scope = savedScope }()
 
-	// Process
-	s.define(&Symbol{Name: "exit", Type: &FuncType{
-		Params: []*Param{{Name: "code", Type: Typ_int}},
-	}, Kind: FuncSym})
-	s.define(&Symbol{Name: "args", Type: &FuncType{
-		Results: []Type{&SliceType{Elem: Typ_string}},
-	}, Kind: FuncSym})
-
-	// Conversions
-	s.define(&Symbol{Name: "string", Type: variadicType, Kind: FuncSym})
-
-	// Constants — file open flags
-	s.define(&Symbol{Name: "O_RDONLY", Type: Typ_int, Kind: ConstSym})
-	s.define(&Symbol{Name: "O_WRONLY", Type: Typ_int, Kind: ConstSym})
-	s.define(&Symbol{Name: "O_RDWR", Type: Typ_int, Kind: ConstSym})
-	s.define(&Symbol{Name: "O_CREATE", Type: Typ_int, Kind: ConstSym})
-	s.define(&Symbol{Name: "O_TRUNC", Type: Typ_int, Kind: ConstSym})
-	s.define(&Symbol{Name: "O_APPEND", Type: Typ_int, Kind: ConstSym})
-
-	// Constants — standard file descriptors
-	s.define(&Symbol{Name: "STDIN", Type: Typ_int, Kind: ConstSym})
-	s.define(&Symbol{Name: "STDOUT", Type: Typ_int, Kind: ConstSym})
-	s.define(&Symbol{Name: "STDERR", Type: Typ_int, Kind: ConstSym})
+	for _, d := range f.Decls {
+		switch d := d.(type) {
+		case *ast.FuncDecl:
+			ft := c.resolveFuncDeclType(d)
+			s.define(&Symbol{Name: d.Name.Name, Type: ft, Kind: FuncSym})
+		case *ast.ConstDecl:
+			var typ Type
+			if d.Type != nil {
+				typ = c.resolveTypeExpr(d.Type)
+			} else {
+				typ = Typ_int // default for untyped constants
+			}
+			s.define(&Symbol{Name: d.Name.Name, Type: typ, Kind: ConstSym})
+		case *ast.TypeDecl:
+			typ := c.resolveTypeExpr(d.Type)
+			s.define(&Symbol{Name: d.Name.Name, Type: typ, Kind: TypeSym})
+		case *ast.GroupDecl:
+			for _, inner := range d.Decls {
+				switch inner := inner.(type) {
+				case *ast.ConstDecl:
+					var typ Type
+					if inner.Type != nil {
+						typ = c.resolveTypeExpr(inner.Type)
+					} else {
+						typ = Typ_int
+					}
+					s.define(&Symbol{Name: inner.Name.Name, Type: typ, Kind: ConstSym})
+				}
+			}
+		}
+	}
 	return s
+}
+
+// resolveFuncDeclType builds a FuncType from a function declaration's signature.
+func (c *Checker) resolveFuncDeclType(d *ast.FuncDecl) *FuncType {
+	var params []*Param
+	for _, p := range d.Params {
+		params = append(params, &Param{
+			Name: p.Name.Name,
+			Type: c.resolveTypeExpr(p.Type),
+		})
+	}
+	var results []Type
+	for _, r := range d.Results {
+		results = append(results, c.resolveTypeExpr(r))
+	}
+	return &FuncType{Params: params, Results: results}
 }
 
 func (c *Checker) pushScope() {
