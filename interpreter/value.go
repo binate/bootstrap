@@ -82,6 +82,22 @@ type SliceVal struct {
 
 func (v *SliceVal) Type() types.Type { return v.Typ }
 func (v *SliceVal) String() string {
+	// []char ([]uint8) slices are printed as strings
+	var elem types.Type
+	if st, ok := v.Typ.(*types.SliceType); ok {
+		elem = st.Elem
+	} else if st, ok := v.Typ.(*types.ManagedSliceType); ok {
+		elem = st.Elem
+	}
+	if elem != nil && (types.Identical(elem, types.Typ_char) || types.Identical(elem, types.Typ_uint8)) {
+		buf := make([]byte, len(v.Elems))
+		for i, e := range v.Elems {
+			if iv, ok := e.(*IntVal); ok {
+				buf[i] = byte(iv.Val)
+			}
+		}
+		return string(buf)
+	}
 	parts := make([]string, len(v.Elems))
 	for i, e := range v.Elems {
 		parts[i] = e.String()
