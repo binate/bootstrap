@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/binate/bootstrap/ast"
 	"github.com/binate/bootstrap/interpreter"
@@ -15,28 +14,54 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: binate <file.bn> [file2.bn ...] [-- args...]\n")
+		fmt.Fprintf(os.Stderr, "usage: binate [-root dir] <file.bn> [file2.bn ...] [-- args...]\n")
 		os.Exit(1)
 	}
 
-	// Split args at "--": files before, program args after
+	// Parse CLI flags, filenames, and program args
+	var root string
 	var filenames []string
 	progArgs := []string{}
-	seenSep := false
-	for _, arg := range os.Args[1:] {
+	i := 1
+	for i < len(os.Args) {
+		arg := os.Args[i]
 		if arg == "--" {
-			seenSep = true
+			progArgs = os.Args[i+1:]
+			break
+		}
+		if arg == "-root" && i+1 < len(os.Args) {
+			root = os.Args[i+1]
+			i += 2
 			continue
 		}
-		if seenSep {
-			progArgs = append(progArgs, arg)
-		} else {
-			filenames = append(filenames, arg)
-		}
+		filenames = append(filenames, arg)
+		i++
 	}
 	if len(filenames) == 0 {
-		fmt.Fprintf(os.Stderr, "usage: binate <file.bn> [file2.bn ...] [-- args...]\n")
+		fmt.Fprintf(os.Stderr, "usage: binate [-root dir] <file.bn> [file2.bn ...] [-- args...]\n")
 		os.Exit(1)
+	}
+
+	// Validate all files are in the same directory
+	if len(filenames) > 1 {
+		dir0, err := filepath.Abs(filepath.Dir(filenames[0]))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s\n", err)
+			os.Exit(1)
+		}
+		for _, f := range filenames[1:] {
+			dir, err := filepath.Abs(filepath.Dir(f))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: %s\n", err)
+				os.Exit(1)
+			}
+			if dir != dir0 {
+				fmt.Fprintf(os.Stderr, "error: all source files must be in the same directory\n")
+				fmt.Fprintf(os.Stderr, "  %s is in %s\n", filenames[0], dir0)
+				fmt.Fprintf(os.Stderr, "  %s is in %s\n", f, dir)
+				os.Exit(1)
+			}
+		}
 	}
 
 	// Parse all main package files
@@ -69,8 +94,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Determine project root from first file's path and package declaration
-	root := inferRoot(filenames[0], merged.PkgName.Value)
+	// Project root: -root flag, or current working directory
+	if root == "" {
+		root, err = os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s\n", err)
+			os.Exit(1)
+		}
+	}
 
 	// Load all imported packages
 	ldr := loader.New(root)
@@ -116,37 +147,6 @@ func main() {
 		interp.LoadPackage(pkgPath, pkg.Merged, c)
 	}
 	runWithRecovery(interp, merged, c)
-}
-
-// inferRoot determines the project root from a source file path and its
-// package declaration. For example, if the file is at /project/cmd/app/main.bn
-// and declares package "cmd/app", root is /project. For package "main",
-// root is the directory containing the file.
-func inferRoot(filename string, pkgName string) string {
-	absPath, err := filepath.Abs(filename)
-	if err != nil {
-		return filepath.Dir(filename)
-	}
-	dir := filepath.Dir(absPath)
-
-	// Strip quotes from package name
-	pkg := pkgName
-	if len(pkg) >= 2 && pkg[0] == '"' && pkg[len(pkg)-1] == '"' {
-		pkg = pkg[1 : len(pkg)-1]
-	}
-
-	// For "main" package, root is the directory of the file
-	if pkg == "main" {
-		return dir
-	}
-
-	// For other packages, walk up from dir by the number of path components
-	parts := strings.Split(pkg, "/")
-	root := dir
-	for range parts {
-		root = filepath.Dir(root)
-	}
-	return root
 }
 
 func runWithRecovery(interp *interpreter.Interpreter, f *ast.File, c *types.Checker) {
