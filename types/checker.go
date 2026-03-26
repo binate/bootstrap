@@ -85,10 +85,6 @@ func NewChecker() *Checker {
 	}
 	c.scope = c.universeScope()
 	bootstrapScope := c.loadBNI(bootstrapBNI, "pkg/bootstrap.bni")
-	// The string function is variadic (accepts any type) — override with variadic marker.
-	if sym := bootstrapScope.symbols["string"]; sym != nil {
-		sym.Type = &FuncType{} // empty params = variadic marker
-	}
 	c.packages["pkg/bootstrap"] = bootstrapScope
 	return c
 }
@@ -893,13 +889,29 @@ func (c *Checker) checkBinaryOp(pos token.Pos, op token.Type, lt, rt Type) Type 
 	}
 }
 
+// isStringLike reports whether a type is string-like (StringLitType or []char).
+func isStringLike(t Type) bool {
+	t = ResolveAlias(t)
+	if _, ok := t.(*StringLitType); ok {
+		return true
+	}
+	if st, ok := t.(*SliceType); ok {
+		return Identical(st.Elem, Typ_char)
+	}
+	return false
+}
+
 func (c *Checker) checkArithOp(pos token.Pos, op token.Type, lt, rt Type) Type {
 	// String concatenation with +
+	// Works with string literals and []char (interchangeable in bootstrap).
 	if op == token.PLUS {
-		if _, ok := ResolveAlias(lt).(*StringLitType); ok {
-			if _, ok := ResolveAlias(rt).(*StringLitType); ok {
-				return Typ_string
+		if isStringLike(lt) && isStringLike(rt) {
+			// If either is []char, return []char; otherwise string
+			charSlice := &SliceType{Elem: Typ_char}
+			if Identical(ResolveAlias(lt), charSlice) || Identical(ResolveAlias(rt), charSlice) {
+				return charSlice
 			}
+			return Typ_string
 		}
 	}
 	if !IsNumeric(lt) {

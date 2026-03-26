@@ -133,13 +133,14 @@ The `pkg/bootstrap` package provides OS-level primitives backed by Go in the boo
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `open`   | `(path string, flags int) int` | Open a file, returns fd (-1 on error) |
-| `read`   | `(fd int, buf []uint8, n int) int` | Read up to n bytes into buf |
-| `write`  | `(fd int, buf []uint8, n int) int` | Write n bytes from buf |
-| `close`  | `(fd int) int` | Close a file descriptor |
-| `exit`   | `(code int)` | Exit the process |
-| `args`   | `() []string` | Program arguments (after `--`) |
-| `string` | `(v ...) string` | Convert a value to string |
+| `Open`   | `(path []char, flags int) int` | Open a file, returns fd (-1 on error) |
+| `Read`   | `(fd int, buf []uint8, n int) int` | Read up to n bytes into buf |
+| `Write`  | `(fd int, buf []uint8, n int) int` | Write n bytes from buf |
+| `Close`  | `(fd int) int` | Close a file descriptor |
+| `Exit`   | `(code int)` | Exit the process |
+| `Args`   | `() [][]char` | Program arguments (after `--`) |
+| `Itoa`   | `(v int) []char` | Convert int to decimal string |
+| `Concat` | `(a []char, b []char) []char` | Concatenate two strings |
 
 Constants: `O_RDONLY`, `O_WRONLY`, `O_RDWR`, `O_CREATE`, `O_TRUNC`, `O_APPEND`, `STDIN`, `STDOUT`, `STDERR`.
 

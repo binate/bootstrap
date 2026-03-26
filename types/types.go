@@ -422,6 +422,21 @@ func AssignableTo(src, dst Type) bool {
 		}
 	}
 
+	// string ↔ []char interchangeability (bootstrap convenience).
+	// In real Binate, string literals are []const char. The bootstrap lacks
+	// const types, so string and []char are treated as interchangeable.
+	charSlice := &SliceType{Elem: Typ_char}
+	if _, ok := src.(*StringLitType); ok {
+		if Identical(dst, charSlice) {
+			return true
+		}
+	}
+	if _, ok := dst.(*StringLitType); ok {
+		if Identical(src, charSlice) {
+			return true
+		}
+	}
+
 	return false
 }
 

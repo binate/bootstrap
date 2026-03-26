@@ -199,9 +199,34 @@ func (interp *Interpreter) registerBuiltins() {
 func (interp *Interpreter) registerBootstrapPackage() {
 	pkg := newEnv(nil)
 
-	// exit
-	pkg.define("exit", &BuiltinFuncVal{
-		Name: "exit",
+	// stringToGo converts a Binate string (StringVal or []char SliceVal) to a Go string.
+	stringToGo := func(v Value) string {
+		if sv, ok := v.(*StringVal); ok {
+			return sv.Val
+		}
+		if sv, ok := v.(*SliceVal); ok {
+			buf := make([]byte, len(sv.Elems))
+			for i, e := range sv.Elems {
+				switch ev := e.(type) {
+				case *IntVal:
+					buf[i] = byte(ev.Val)
+				case *CharVal:
+					buf[i] = byte(ev.Val)
+				}
+			}
+			return string(buf)
+		}
+		return v.String()
+	}
+
+	// goToCharSlice converts a Go string to a Binate []char SliceVal.
+	goToCharSlice := func(s string) Value {
+		return &StringVal{Val: s}
+	}
+
+	// Exit: Exit(code int)
+	pkg.define("Exit", &BuiltinFuncVal{
+		Name: "Exit",
 		Fn: func(args []Value) Value {
 			code := 0
 			if len(args) > 0 {
@@ -213,42 +238,39 @@ func (interp *Interpreter) registerBootstrapPackage() {
 			return &NilVal{}
 		},
 	})
-	// string: convert value to string
-	pkg.define("string", &BuiltinFuncVal{
-		Name: "string",
+	// Itoa: Itoa(v int) []char — convert int to decimal string
+	pkg.define("Itoa", &BuiltinFuncVal{
+		Name: "Itoa",
 		Fn: func(args []Value) Value {
 			if len(args) == 0 {
-				return &StringVal{Val: ""}
+				return goToCharSlice("")
 			}
-			// []byte / []uint8 → string
-			if sv, ok := args[0].(*SliceVal); ok {
-				var buf []byte
-				for _, e := range sv.Elems {
-					if iv, ok := e.(*IntVal); ok {
-						buf = append(buf, byte(iv.Val))
-					}
-				}
-				return &StringVal{Val: string(buf)}
-			}
-			// char → string
-			if cv, ok := args[0].(*CharVal); ok {
-				return &StringVal{Val: string(cv.Val)}
-			}
-			// int → string (decimal)
 			if iv, ok := args[0].(*IntVal); ok {
-				return &StringVal{Val: strconv.FormatInt(iv.Val, 10)}
+				return goToCharSlice(strconv.FormatInt(iv.Val, 10))
 			}
-			return &StringVal{Val: args[0].String()}
+			return goToCharSlice(args[0].String())
 		},
 	})
-	// open: open(path string, mode int) int — returns fd
-	pkg.define("open", &BuiltinFuncVal{
-		Name: "open",
+	// Concat: Concat(a []char, b []char) []char — concatenate two strings
+	pkg.define("Concat", &BuiltinFuncVal{
+		Name: "Concat",
 		Fn: func(args []Value) Value {
 			if len(args) < 2 {
-				panic("open requires 2 arguments: path, flags")
+				panic("Concat requires 2 arguments")
 			}
-			path := args[0].(*StringVal).Val
+			a := stringToGo(args[0])
+			b := stringToGo(args[1])
+			return goToCharSlice(a + b)
+		},
+	})
+	// Open: Open(path []char, flags int) int — returns fd
+	pkg.define("Open", &BuiltinFuncVal{
+		Name: "Open",
+		Fn: func(args []Value) Value {
+			if len(args) < 2 {
+				panic("Open requires 2 arguments: path, flags")
+			}
+			path := stringToGo(args[0])
 			flags := int(args[1].(*IntVal).Val)
 			fd, err := interp.openFile(path, flags)
 			if err != nil {
@@ -257,12 +279,12 @@ func (interp *Interpreter) registerBootstrapPackage() {
 			return &IntVal{Val: int64(fd), Typ: types.Typ_int}
 		},
 	})
-	// read: read(fd int, buf []byte, n int) int — returns bytes read
-	pkg.define("read", &BuiltinFuncVal{
-		Name: "read",
+	// Read: Read(fd int, buf []uint8, n int) int — returns bytes read
+	pkg.define("Read", &BuiltinFuncVal{
+		Name: "Read",
 		Fn: func(args []Value) Value {
 			if len(args) < 3 {
-				panic("read requires 3 arguments: fd, buf, n")
+				panic("Read requires 3 arguments: fd, buf, n")
 			}
 			fd := int(args[0].(*IntVal).Val)
 			buf := args[1].(*SliceVal)
@@ -271,12 +293,12 @@ func (interp *Interpreter) registerBootstrapPackage() {
 			return &IntVal{Val: int64(nRead), Typ: types.Typ_int}
 		},
 	})
-	// write: write(fd int, data []byte, n int) int — returns bytes written
-	pkg.define("write", &BuiltinFuncVal{
-		Name: "write",
+	// Write: Write(fd int, data []uint8, n int) int — returns bytes written
+	pkg.define("Write", &BuiltinFuncVal{
+		Name: "Write",
 		Fn: func(args []Value) Value {
 			if len(args) < 3 {
-				panic("write requires 3 arguments: fd, data, n")
+				panic("Write requires 3 arguments: fd, data, n")
 			}
 			fd := int(args[0].(*IntVal).Val)
 			data := args[1].(*SliceVal)
@@ -285,12 +307,12 @@ func (interp *Interpreter) registerBootstrapPackage() {
 			return &IntVal{Val: int64(nWritten), Typ: types.Typ_int}
 		},
 	})
-	// close: close(fd int) int — returns 0 on success
-	pkg.define("close", &BuiltinFuncVal{
-		Name: "close",
+	// Close: Close(fd int) int — returns 0 on success
+	pkg.define("Close", &BuiltinFuncVal{
+		Name: "Close",
 		Fn: func(args []Value) Value {
 			if len(args) < 1 {
-				panic("close requires 1 argument: fd")
+				panic("Close requires 1 argument: fd")
 			}
 			fd := int(args[0].(*IntVal).Val)
 			err := interp.closeFile(fd)
@@ -300,13 +322,13 @@ func (interp *Interpreter) registerBootstrapPackage() {
 			return &IntVal{Val: 0, Typ: types.Typ_int}
 		},
 	})
-	// args: args() []string — returns program arguments (after -- separator)
-	pkg.define("args", &BuiltinFuncVal{
-		Name: "args",
+	// Args: Args() [][]char — returns program arguments (after -- separator)
+	pkg.define("Args", &BuiltinFuncVal{
+		Name: "Args",
 		Fn: func(args []Value) Value {
 			elems := make([]Value, len(interp.progArgs))
 			for i, a := range interp.progArgs {
-				elems[i] = &StringVal{Val: a}
+				elems[i] = goToCharSlice(a)
 			}
 			return &SliceVal{
 				Elems: elems,

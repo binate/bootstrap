@@ -3,15 +3,15 @@ package "main"
 import "pkg/bootstrap"
 
 func main() {
-	a := bootstrap.args()
+	a := bootstrap.Args()
 	if len(a) == 0 {
 		println("usage: wc <file>")
-		bootstrap.exit(1)
+		bootstrap.Exit(1)
 	}
-	fd := bootstrap.open(a[0], 0)
+	fd := bootstrap.Open(a[0], 0)
 	if fd < 0 {
 		println("error: could not open file")
-		bootstrap.exit(1)
+		bootstrap.Exit(1)
 	}
 
 	lines := 0
@@ -21,7 +21,7 @@ func main() {
 	buf := make([]byte, 4096)
 
 	for {
-		n := bootstrap.read(fd, buf, 4096)
+		n := bootstrap.Read(fd, buf, 4096)
 		if n <= 0 {
 			break
 		}
@@ -39,7 +39,7 @@ func main() {
 			}
 		}
 	}
-	bootstrap.close(fd)
+	bootstrap.Close(fd)
 
 	println(lines, words, chars)
 }

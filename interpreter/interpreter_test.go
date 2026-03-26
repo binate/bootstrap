@@ -630,7 +630,7 @@ import "pkg/bootstrap"
 
 func main() {
 	x := 42
-	println(bootstrap.string(x))
+	println(bootstrap.Itoa(x))
 }
 `
 	got := runProgram(t, src)
@@ -1001,7 +1001,7 @@ func TestPackageImport(t *testing.T) {
 import "pkg/bootstrap"
 
 func main() {
-	s := bootstrap.string(42)
+	s := bootstrap.Itoa(42)
 	println(s)
 	println(bootstrap.STDOUT)
 }
@@ -1378,5 +1378,107 @@ func main() {
 	// baz(1) = 2, bar(2) = 12, foo(12) = 36
 	if got != "36\n" {
 		t.Errorf("expected %q, got %q", "36\n", got)
+	}
+}
+
+func TestStringConcat(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var a []char = "hello"
+	var b []char = " world"
+	println(a + b)
+}
+`
+	got := runProgram(t, src)
+	if got != "hello world\n" {
+		t.Errorf("expected %q, got %q", "hello world\n", got)
+	}
+}
+
+func TestStringLenCharSlice(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var s []char = "hello"
+	println(len(s))
+	println(len("abc"))
+}
+`
+	got := runProgram(t, src)
+	if got != "5\n3\n" {
+		t.Errorf("expected %q, got %q", "5\n3\n", got)
+	}
+}
+
+func TestStringCharSliceAssignable(t *testing.T) {
+	src := `package "main"
+
+func greet(name []char) []char {
+	return "hello " + name
+}
+
+func main() {
+	println(greet("world"))
+}
+`
+	got := runProgram(t, src)
+	if got != "hello world\n" {
+		t.Errorf("expected %q, got %q", "hello world\n", got)
+	}
+}
+
+func TestBootstrapConcat(t *testing.T) {
+	src := `package "main"
+
+import "pkg/bootstrap"
+
+func main() {
+	var a []char = "foo"
+	var b []char = "bar"
+	println(bootstrap.Concat(a, b))
+	println(bootstrap.Concat("hello", " world"))
+}
+`
+	got := runProgram(t, src)
+	if got != "foobar\nhello world\n" {
+		t.Errorf("expected %q, got %q", "foobar\nhello world\n", got)
+	}
+}
+
+func TestBootstrapItoa(t *testing.T) {
+	src := `package "main"
+
+import "pkg/bootstrap"
+
+func main() {
+	println(bootstrap.Itoa(42))
+	println(bootstrap.Itoa(0))
+	println(bootstrap.Itoa(12345))
+}
+`
+	got := runProgram(t, src)
+	if got != "42\n0\n12345\n" {
+		t.Errorf("expected %q, got %q", "42\n0\n12345\n", got)
+	}
+}
+
+func TestQualifiedType(t *testing.T) {
+	// This test requires a real package — use the pkgtest setup
+	// For now, test that the checker accepts qualified types
+	// by ensuring a program with bootstrap types compiles
+	src := `package "main"
+
+import "pkg/bootstrap"
+
+func main() {
+	var x int = 42
+	var s []char = bootstrap.Itoa(x)
+	println(s)
+}
+`
+	got := runProgram(t, src)
+	if got != "42\n" {
+		t.Errorf("expected %q, got %q", "42\n", got)
 	}
 }

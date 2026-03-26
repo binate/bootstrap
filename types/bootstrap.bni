@@ -1,17 +1,20 @@
 package "pkg/bootstrap"
 
 // File I/O
-func open(path string, flags int) int
-func read(fd int, buf []uint8, n int) int
-func write(fd int, buf []uint8, n int) int
-func close(fd int) int
+func Open(path []char, flags int) int
+func Read(fd int, buf []uint8, n int) int
+func Write(fd int, buf []uint8, n int) int
+func Close(fd int) int
 
 // Process
-func exit(code int)
-func args() []string
+func Exit(code int)
+func Args() [][]char
 
-// Conversions (variadic — accepts any single argument)
-func string(v int) string
+// Conversions
+func Itoa(v int) []char
+
+// String operations
+func Concat(a []char, b []char) []char
 
 // File open flags
 const O_RDONLY int = 0

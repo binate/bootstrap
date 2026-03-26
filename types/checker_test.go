@@ -519,3 +519,55 @@ func foo() (int, int) {
 	c := checkFile(t, src)
 	expectError(t, c, "wrong number of return values")
 }
+
+func TestCheckStringCharSliceAssignable(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var s []char = "hello"
+	println(s)
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+func TestCheckCharSliceReturnString(t *testing.T) {
+	src := `package "main"
+
+func greet() []char {
+	return "hello"
+}
+
+func main() {
+	println(greet())
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+func TestCheckStringConcatPlus(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var a []char = "hello"
+	var b []char = " world"
+	println(a + b)
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+func TestCheckStringLenAllowed(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var n int = len("hello")
+	println(n)
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}

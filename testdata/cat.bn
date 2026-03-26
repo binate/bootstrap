@@ -3,23 +3,23 @@ package "main"
 import "pkg/bootstrap"
 
 func main() {
-	a := bootstrap.args()
+	a := bootstrap.Args()
 	if len(a) == 0 {
 		println("usage: cat <file>")
-		bootstrap.exit(1)
+		bootstrap.Exit(1)
 	}
-	fd := bootstrap.open(a[0], bootstrap.O_RDONLY)
+	fd := bootstrap.Open(a[0], bootstrap.O_RDONLY)
 	if fd < 0 {
 		println("error: could not open file")
-		bootstrap.exit(1)
+		bootstrap.Exit(1)
 	}
 	buf := make([]byte, 4096)
 	for {
-		n := bootstrap.read(fd, buf, 4096)
+		n := bootstrap.Read(fd, buf, 4096)
 		if n <= 0 {
 			break
 		}
-		bootstrap.write(bootstrap.STDOUT, buf, n)
+		bootstrap.Write(bootstrap.STDOUT, buf, n)
 	}
-	bootstrap.close(fd)
+	bootstrap.Close(fd)
 }
