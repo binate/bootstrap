@@ -3,6 +3,7 @@ package interpreter
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -381,6 +382,33 @@ func (interp *Interpreter) registerBootstrapPackage() {
 				Elems: elems,
 				Typ:   &types.SliceType{Elem: types.Typ_string},
 			}
+		},
+	})
+
+	// Exec: Exec(program []char, args [][]char) int — run a subprocess, returns exit code
+	pkg.define("Exec", &BuiltinFuncVal{
+		Name: "Exec",
+		Fn: func(args []Value) Value {
+			if len(args) < 2 {
+				panic("Exec requires 2 arguments: program, args")
+			}
+			program := stringToGo(args[0])
+			argSlice := args[1].(*SliceVal)
+			cmdArgs := make([]string, len(argSlice.Elems))
+			for i, elem := range argSlice.Elems {
+				cmdArgs[i] = stringToGo(elem)
+			}
+			cmd := exec.Command(program, cmdArgs...)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			err := cmd.Run()
+			if err != nil {
+				if exitErr, ok := err.(*exec.ExitError); ok {
+					return &IntVal{Val: int64(exitErr.ExitCode()), Typ: types.Typ_int}
+				}
+				return &IntVal{Val: -1, Typ: types.Typ_int}
+			}
+			return &IntVal{Val: 0, Typ: types.Typ_int}
 		},
 	})
 

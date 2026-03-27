@@ -13,6 +13,7 @@ func Stat(path []char) int
 // Process
 func Exit(code int)
 func Args() [][]char
+func Exec(program []char, args [][]char) int
 
 // Conversions
 func Itoa(v int) []char
