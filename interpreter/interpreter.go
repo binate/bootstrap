@@ -185,11 +185,9 @@ func (interp *Interpreter) registerBuiltins() {
 				}
 				panic(fmt.Sprintf("append: first argument must be a slice, got %T", args[0]))
 			}
-			newElems := make([]Value, len(sv.Elems), len(sv.Elems)+len(args)-1)
-			copy(newElems, sv.Elems)
-			for _, a := range args[1:] {
-				newElems = append(newElems, a)
-			}
+			// Use Go's built-in append for geometric growth — avoids O(n²)
+			// copying when building strings character by character.
+			newElems := append(sv.Elems, args[1:]...)
 			return &SliceVal{Elems: newElems, Typ: sv.Typ}
 		},
 	})

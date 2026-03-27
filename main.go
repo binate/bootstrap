@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"strings"
 
 	"github.com/binate/bootstrap/ast"
@@ -22,6 +23,7 @@ func main() {
 	var root string
 	var testMode bool
 	var verbose bool
+	var cpuProfile string
 	var filenames []string
 	progArgs := []string{}
 	i := 1
@@ -46,11 +48,27 @@ func main() {
 			i++
 			continue
 		}
+		if arg == "-cpuprofile" && i+1 < len(os.Args) {
+			cpuProfile = os.Args[i+1]
+			i += 2
+			continue
+		}
 		filenames = append(filenames, arg)
 		i++
 	}
 	if len(filenames) == 0 {
 		usage()
+	}
+
+	// CPU profiling
+	if cpuProfile != "" {
+		f, err := os.Create(cpuProfile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error creating profile: %s\n", err)
+			os.Exit(1)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
 	}
 
 	if testMode {
