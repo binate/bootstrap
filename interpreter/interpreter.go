@@ -719,7 +719,7 @@ func (interp *Interpreter) execVarDecl(d *ast.VarDecl) {
 		if d.Type != nil {
 			val = interp.coerce(val, interp.resolveType(d.Type))
 		}
-		interp.env.define(d.Name.Name, val)
+		interp.env.define(d.Name.Name, copyValue(val))
 	} else if d.Type != nil {
 		interp.env.define(d.Name.Name, ZeroValue(interp.resolveType(d.Type)))
 	}
@@ -873,6 +873,7 @@ func (interp *Interpreter) execAssign(s *ast.AssignStmt) {
 func (interp *Interpreter) assignTo(lhs ast.Expr, val Value) {
 	switch lhs := lhs.(type) {
 	case *ast.Ident:
+		val = copyValue(val)
 		if !interp.env.set(lhs.Name, val) {
 			interp.env.define(lhs.Name, val)
 		}
@@ -947,7 +948,7 @@ func (interp *Interpreter) execShortVarDecl(s *ast.ShortVarDecl) {
 	}
 	for i, name := range s.Names {
 		val := interp.evalExpr(s.RHS[i])
-		interp.env.define(name.Name, val)
+		interp.env.define(name.Name, copyValue(val))
 	}
 }
 
@@ -1413,10 +1414,10 @@ func (interp *Interpreter) callFuncInEnv(decl *ast.FuncDecl, args []Value, env *
 	interp.env = newEnv(env)
 	defer func() { interp.env = savedEnv }()
 
-	// Bind parameters
+	// Bind parameters (copy struct/array values for value semantics)
 	for i, p := range decl.Params {
 		if i < len(args) {
-			interp.env.define(p.Name.Name, args[i])
+			interp.env.define(p.Name.Name, copyValue(args[i]))
 		}
 	}
 

@@ -15,6 +15,19 @@ type Value interface {
 	String() string
 }
 
+// copyValue returns a shallow copy of struct and array values.
+// Other value types (int, bool, string, slice, pointer) are left as-is.
+func copyValue(v Value) Value {
+	switch val := v.(type) {
+	case *StructVal:
+		return val.Copy()
+	case *ArrayVal:
+		return val.Copy()
+	default:
+		return v
+	}
+}
+
 // IntVal represents an integer value.
 type IntVal struct {
 	Val int64
@@ -112,6 +125,15 @@ type ArrayVal struct {
 }
 
 func (v *ArrayVal) Type() types.Type { return v.Typ }
+
+// Copy returns a deep copy of the array (recursively copies nested structs/arrays).
+func (v *ArrayVal) Copy() *ArrayVal {
+	elems := make([]Value, len(v.Elems))
+	for i, e := range v.Elems {
+		elems[i] = copyValue(e)
+	}
+	return &ArrayVal{Elems: elems, Typ: v.Typ}
+}
 func (v *ArrayVal) String() string {
 	parts := make([]string, len(v.Elems))
 	for i, e := range v.Elems {
@@ -127,6 +149,15 @@ type StructVal struct {
 }
 
 func (v *StructVal) Type() types.Type { return v.Typ }
+
+// Copy returns a deep copy of the struct (recursively copies nested structs/arrays).
+func (v *StructVal) Copy() *StructVal {
+	fields := make([]Value, len(v.Fields))
+	for i, f := range v.Fields {
+		fields[i] = copyValue(f)
+	}
+	return &StructVal{Fields: fields, Typ: v.Typ}
+}
 func (v *StructVal) String() string {
 	parts := make([]string, len(v.Fields))
 	for i, f := range v.Fields {
