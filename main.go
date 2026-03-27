@@ -21,6 +21,7 @@ func main() {
 	// Parse CLI flags
 	var root string
 	var testMode bool
+	var verbose bool
 	var filenames []string
 	progArgs := []string{}
 	i := 1
@@ -40,6 +41,11 @@ func main() {
 			i++
 			continue
 		}
+		if arg == "-v" || arg == "-verbose" {
+			verbose = true
+			i++
+			continue
+		}
 		filenames = append(filenames, arg)
 		i++
 	}
@@ -48,20 +54,32 @@ func main() {
 	}
 
 	if testMode {
-		runTests(root, filenames)
+		// Validate that test arguments are package paths, not file paths
+		for _, arg := range filenames {
+			if strings.HasSuffix(arg, ".bn") || strings.HasSuffix(arg, ".bni") {
+				fmt.Fprintf(os.Stderr, "error: -test takes package paths, not files: %s\n", arg)
+				fmt.Fprintf(os.Stderr, "  use: binate -test [-root dir] pkg/foo\n")
+				os.Exit(1)
+			}
+			if filepath.IsAbs(arg) {
+				fmt.Fprintf(os.Stderr, "error: -test takes package paths (e.g. pkg/foo), not absolute paths: %s\n", arg)
+				os.Exit(1)
+			}
+		}
+		runTests(root, filenames, verbose)
 	} else {
-		runProgram(root, filenames, progArgs)
+		runProgram(root, filenames, progArgs, verbose)
 	}
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: binate [-root dir] <file.bn> [file2.bn ...] [-- args...]\n")
-	fmt.Fprintf(os.Stderr, "       binate -test [-root dir] <pkg/foo> [pkg/bar ...]\n")
+	fmt.Fprintf(os.Stderr, "usage: binate [-v] [-root dir] <file.bn> [file2.bn ...] [-- args...]\n")
+	fmt.Fprintf(os.Stderr, "       binate [-v] -test [-root dir] <pkg/foo> [pkg/bar ...]\n")
 	os.Exit(1)
 }
 
 // runTests runs Test* functions in the specified packages.
-func runTests(root string, testPkgs []string) {
+func runTests(root string, testPkgs []string, verbose bool) {
 	var err error
 	if root == "" {
 		root, err = os.Getwd()
@@ -73,6 +91,7 @@ func runTests(root string, testPkgs []string) {
 
 	// Set up loader with test packages enabled
 	ldr := loader.New(root)
+	ldr.Verbose = verbose
 	ldr.RegisterBuiltin("pkg/bootstrap")
 	ldr.TestPackages = make(map[string]bool)
 	for _, pkg := range testPkgs {
@@ -94,8 +113,13 @@ func runTests(root string, testPkgs []string) {
 		os.Exit(1)
 	}
 
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[verbose] loaded %d packages in order: %v\n", len(ldr.Order), ldr.Order)
+	}
+
 	// Type check all packages in dependency order
 	c := types.NewChecker()
+	c.Verbose = verbose
 	for _, pkgPath := range ldr.Order {
 		pkg := ldr.Packages[pkgPath]
 		if pkg.Builtin {
@@ -117,6 +141,7 @@ func runTests(root string, testPkgs []string) {
 
 	// Load packages in interpreter
 	interp := interpreter.New()
+	interp.Verbose = verbose
 	for _, pkgPath := range ldr.Order {
 		pkg := ldr.Packages[pkgPath]
 		if pkg.Builtin || pkg.Merged == nil {
@@ -210,7 +235,7 @@ func isTestResultReturn(fd *ast.FuncDecl) bool {
 }
 
 // runProgram runs a Binate program (the normal non-test mode).
-func runProgram(root string, filenames []string, progArgs []string) {
+func runProgram(root string, filenames []string, progArgs []string, verbose bool) {
 	// Validate all files are in the same directory
 	if len(filenames) > 1 {
 		dir0, err := filepath.Abs(filepath.Dir(filenames[0]))
@@ -274,6 +299,7 @@ func runProgram(root string, filenames []string, progArgs []string) {
 
 	// Load all imported packages
 	ldr := loader.New(root)
+	ldr.Verbose = verbose
 	ldr.RegisterBuiltin("pkg/bootstrap")
 	ldr.LoadImports(merged.Imports)
 	if len(ldr.Errors) > 0 {
@@ -283,8 +309,13 @@ func runProgram(root string, filenames []string, progArgs []string) {
 		os.Exit(1)
 	}
 
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[verbose] loaded %d packages in order: %v\n", len(ldr.Order), ldr.Order)
+	}
+
 	// Type check: packages in dependency order, then main
 	c := types.NewChecker()
+	c.Verbose = verbose
 	for _, pkgPath := range ldr.Order {
 		pkg := ldr.Packages[pkgPath]
 		if pkg.Builtin {
@@ -305,8 +336,13 @@ func runProgram(root string, filenames []string, progArgs []string) {
 		os.Exit(1)
 	}
 
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[verbose] type checking passed\n")
+	}
+
 	// Run: load packages in dependency order, then run main
 	interp := interpreter.New()
+	interp.Verbose = verbose
 	interp.SetArgs(progArgs)
 	for _, pkgPath := range ldr.Order {
 		pkg := ldr.Packages[pkgPath]

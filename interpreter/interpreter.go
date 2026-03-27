@@ -41,6 +41,7 @@ type Interpreter struct {
 	importAliases map[string]string                // local name -> package path
 	progArgs      []string                         // program arguments (from -- separator)
 	iota          int                              // current iota value in grouped const (-1 = not in const group)
+	Verbose       bool                             // verbose logging to stderr
 }
 
 // Env represents a variable environment (frame).
@@ -427,6 +428,9 @@ func (interp *Interpreter) Run(file *ast.File, checker *types.Checker) {
 
 	// Call main if it exists
 	if mainDecl, ok := interp.funcs["main"]; ok {
+		if interp.Verbose {
+			fmt.Fprintf(os.Stderr, "[verbose] calling main()\n")
+		}
 		interp.callFuncInEnv(mainDecl, nil, interp.env)
 	}
 }
@@ -436,6 +440,9 @@ func (interp *Interpreter) Run(file *ast.File, checker *types.Checker) {
 func (interp *Interpreter) LoadPackage(path string, file *ast.File, checker *types.Checker) {
 	if _, ok := interp.packages[path]; ok {
 		return // already loaded
+	}
+	if interp.Verbose {
+		fmt.Fprintf(os.Stderr, "[verbose] loading package %s into interpreter (%d decls)\n", path, len(file.Decls))
 	}
 
 	// Save interpreter state

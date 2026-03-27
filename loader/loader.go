@@ -28,6 +28,7 @@ type Loader struct {
 	Order        []string            // topological order (dependencies first)
 	Errors       []string            // accumulated errors
 	TestPackages map[string]bool     // packages that should include _test.bn files
+	Verbose      bool                // verbose logging to stderr
 	loading      map[string]bool     // cycle detection: packages being loaded
 }
 
@@ -73,6 +74,10 @@ func (l *Loader) loadPackage(path string, imp *ast.ImportSpec) {
 	defer delete(l.loading, path)
 
 	pkg := &Package{Path: path}
+
+	if l.Verbose {
+		fmt.Fprintf(os.Stderr, "[verbose] loading package %s\n", path)
+	}
 
 	// Discover files
 	bniPath := filepath.Join(l.Root, path+".bni")
@@ -148,6 +153,10 @@ func (l *Loader) loadPackage(path string, imp *ast.ImportSpec) {
 			bnFiles = append(bnFiles, f)
 			pkg.Imports = append(pkg.Imports, extractImports(f)...)
 		}
+	}
+
+	if l.Verbose {
+		fmt.Fprintf(os.Stderr, "[verbose]   %s: %d .bn files, bni=%v\n", path, len(bnFiles), pkg.BNI != nil)
 	}
 
 	// Merge .bn files

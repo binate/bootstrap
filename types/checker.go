@@ -3,6 +3,7 @@ package types
 import (
 	_ "embed"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -22,6 +23,7 @@ type Checker struct {
 	funcRet  []Type            // expected return types of current function
 	packages map[string]*Scope // imported package scopes
 	iota     int               // current iota value in grouped const (-1 = not in const group)
+	Verbose  bool              // verbose logging to stderr
 }
 
 // CheckError represents a type-checking error.
@@ -104,6 +106,9 @@ func (c *Checker) LoadPackageInterface(path string, bni *ast.File) {
 // If the package has no .bni (and thus no pre-registered scope), the scope is
 // built from the implementation's top-level declarations.
 func (c *Checker) CheckPackage(path string, merged *ast.File) {
+	if c.Verbose {
+		fmt.Fprintf(os.Stderr, "[verbose] type checking package %s (%d decls)\n", path, len(merged.Decls))
+	}
 	// Save and restore checker state
 	savedFile := c.file
 	savedScope := c.scope

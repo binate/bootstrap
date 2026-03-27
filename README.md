@@ -5,9 +5,13 @@ A tree-walking interpreter for the Binate programming language, written in Go. T
 ## Usage
 
 ```
-binate [-root dir] <file.bn> [file2.bn ...] [-- args...]
-binate -test [-root dir] <pkg/foo> [pkg/bar ...]
+binate [-v] [-root dir] <file.bn> [file2.bn ...] [-- args...]
+binate [-v] -test [-root dir] <pkg/foo> [pkg/bar ...]
 ```
+
+Flags:
+- `-root dir` — set project root directory (default: current directory)
+- `-v` / `-verbose` — enable verbose logging to stderr (package loading, type checking, etc.)
 
 Run from your project root (or specify it with `-root`):
 
@@ -160,6 +164,8 @@ The bootstrap supports running unit tests for Binate packages:
 ```sh
 go run main.go -test -root myproject pkg/foo pkg/bar
 ```
+
+**Important:** `-test` takes *package paths* (e.g. `pkg/foo`), not file paths. Running `go run main.go -test foo_test.bn` will not work — the test runner needs the package path to load all package files alongside the test file.
 
 ### Convention
 
