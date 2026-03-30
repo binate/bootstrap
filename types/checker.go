@@ -1319,6 +1319,19 @@ func (c *Checker) checkBuiltinCall(e *ast.BuiltinCall) Type {
 		c.errorf(e.Pos(), "make_raw_deprecated requires a slice type")
 		return Typ_void
 
+	case token.MAKE_SLICE:
+		// make_slice(T, n) — T is element type, n is size. Returns @[]T (managed-slice).
+		elemType := c.resolveTypeExpr(e.Type)
+		if len(e.Args) != 1 {
+			c.errorf(e.Pos(), "make_slice requires exactly two arguments: element type and size")
+			return Typ_void
+		}
+		at := c.checkExpr(e.Args[0])
+		if !IsInteger(at) {
+			c.errorf(e.Args[0].Pos(), "make_slice size must be integer, got %s", at)
+		}
+		return &ManagedSliceType{Elem: elemType}
+
 	case token.BOX:
 		if len(e.Args) != 1 {
 			c.errorf(e.Pos(), "box requires exactly one argument")

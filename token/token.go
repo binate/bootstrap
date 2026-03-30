@@ -46,6 +46,7 @@ const (
 	builtinStart
 	MAKE
 	MAKE_RAW_DEPRECATED
+	MAKE_SLICE
 	BOX
 	CAST
 	BIT_CAST
@@ -139,6 +140,7 @@ var typeNames = [...]string{
 
 	MAKE:                "make",
 	MAKE_RAW_DEPRECATED: "make_raw_deprecated",
+	MAKE_SLICE:          "make_slice",
 	BOX:                 "box",
 	CAST:         "cast",
 	BIT_CAST:     "bit_cast",

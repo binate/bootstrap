@@ -430,6 +430,8 @@ func (p *Parser) parsePrimaryExpr() ast.Expr {
 		return p.parseMakeCall()
 	case token.MAKE_RAW_DEPRECATED:
 		return p.parseMakeRawDeprecatedCall()
+	case token.MAKE_SLICE:
+		return p.parseMakeSliceCall()
 	case token.BOX:
 		return p.parseBoxCall()
 	case token.CAST:
@@ -621,6 +623,19 @@ func (p *Parser) parseMakeRawDeprecatedCall() *ast.BuiltinCall {
 	}
 	p.expect(token.RPAREN)
 	return &ast.BuiltinCall{BuiltinPos: pos, Builtin: token.MAKE_RAW_DEPRECATED, Type: typ, Args: args}
+}
+
+func (p *Parser) parseMakeSliceCall() *ast.BuiltinCall {
+	pos := p.tok.Pos
+	p.next() // consume make_slice
+	p.expect(token.LPAREN)
+
+	// make_slice(T, n) — element type + size
+	typ := p.parseType()
+	p.expect(token.COMMA)
+	size := p.parseExpr()
+	p.expect(token.RPAREN)
+	return &ast.BuiltinCall{BuiltinPos: pos, Builtin: token.MAKE_SLICE, Type: typ, Args: []ast.Expr{size}}
 }
 
 func (p *Parser) parseBoxCall() *ast.BuiltinCall {

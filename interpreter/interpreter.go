@@ -1628,6 +1628,8 @@ func (interp *Interpreter) evalBuiltinCall(e *ast.BuiltinCall) Value {
 		return interp.evalMake(e)
 	case token.MAKE_RAW_DEPRECATED:
 		return interp.evalMakeRawDeprecated(e)
+	case token.MAKE_SLICE:
+		return interp.evalMakeSlice(e)
 	case token.BOX:
 		arg := interp.evalExpr(e.Args[0])
 		obj := &HeapObject{Val: arg, Refcount: 1}
@@ -1679,6 +1681,20 @@ func (interp *Interpreter) evalMakeRawDeprecated(e *ast.BuiltinCall) Value {
 	}
 
 	panic("make_raw_deprecated requires a slice type")
+}
+
+func (interp *Interpreter) evalMakeSlice(e *ast.BuiltinCall) Value {
+	elemType := interp.resolveType(e.Type)
+	n := interp.evalExpr(e.Args[0]).(*IntVal).Val
+
+	elems := make([]Value, n)
+	for i := range elems {
+		elems[i] = ZeroValue(elemType)
+	}
+	return &SliceVal{
+		Elems: elems,
+		Typ:   &types.ManagedSliceType{Elem: elemType},
+	}
 }
 
 func (interp *Interpreter) evalCast(e *ast.BuiltinCall) Value {
