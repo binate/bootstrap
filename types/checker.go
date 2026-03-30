@@ -1309,6 +1309,21 @@ func (c *Checker) checkBuiltinCall(e *ast.BuiltinCall) Type {
 		}
 		return &ManagedPtrType{Elem: typ}
 
+	case token.MAKE_RAW_DEPRECATED:
+		typ := c.resolveTypeExpr(e.Type)
+		if len(e.Args) > 0 {
+			at := c.checkExpr(e.Args[0])
+			if !IsInteger(at) {
+				c.errorf(e.Args[0].Pos(), "make_raw_deprecated size must be integer, got %s", at)
+			}
+		}
+		// make_raw_deprecated returns raw []T (not managed)
+		if st, ok := typ.(*SliceType); ok {
+			return st
+		}
+		c.errorf(e.Pos(), "make_raw_deprecated requires a slice type")
+		return Typ_void
+
 	case token.BOX:
 		if len(e.Args) != 1 {
 			c.errorf(e.Pos(), "box requires exactly one argument")
