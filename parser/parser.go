@@ -601,15 +601,10 @@ func (p *Parser) parseMakeCall() *ast.BuiltinCall {
 	p.next() // consume make
 	p.expect(token.LPAREN)
 
-	// MakeArg = SliceType "," Expression | Type
+	// make(T) — takes a type, no size argument
 	typ := p.parseType()
-	var args []ast.Expr
-	if p.tok.Type == token.COMMA {
-		p.next()
-		args = append(args, p.parseExpr())
-	}
 	p.expect(token.RPAREN)
-	return &ast.BuiltinCall{BuiltinPos: pos, Builtin: token.MAKE, Type: typ, Args: args}
+	return &ast.BuiltinCall{BuiltinPos: pos, Builtin: token.MAKE, Type: typ}
 }
 
 func (p *Parser) parseMakeRawDeprecatedCall() *ast.BuiltinCall {

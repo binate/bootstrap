@@ -1649,23 +1649,8 @@ func (interp *Interpreter) evalBuiltinCall(e *ast.BuiltinCall) Value {
 func (interp *Interpreter) evalMake(e *ast.BuiltinCall) Value {
 	typ := interp.resolveType(e.Type)
 
-	if st, ok := typ.(*types.SliceType); ok {
-		// make([]T, n)
-		n := int64(0)
-		if len(e.Args) > 0 {
-			n = interp.evalExpr(e.Args[0]).(*IntVal).Val
-		}
-		elems := make([]Value, n)
-		for i := range elems {
-			elems[i] = ZeroValue(st.Elem)
-		}
-		return &SliceVal{
-			Elems: elems,
-			Typ:   &types.ManagedSliceType{Elem: st.Elem},
-		}
-	}
-
-	// make(T) — allocate managed pointer
+	// make(T) — allocate managed pointer to zero-initialized T, returns @T
+	// For any type T including []T (returns @([]T), not @[]T)
 	zv := ZeroValue(typ)
 	obj := &HeapObject{Val: zv, Refcount: 1}
 	return &ManagedPtrVal{

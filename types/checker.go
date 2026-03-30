@@ -1297,16 +1297,11 @@ func (c *Checker) checkBuiltinCall(e *ast.BuiltinCall) Type {
 	switch e.Builtin {
 	case token.MAKE:
 		typ := c.resolveTypeExpr(e.Type)
+		// make(T) — returns @T for any type T, no size argument
 		if len(e.Args) > 0 {
-			at := c.checkExpr(e.Args[0])
-			if !IsInteger(at) {
-				c.errorf(e.Args[0].Pos(), "make size must be integer, got %s", at)
-			}
+			c.errorf(e.Pos(), "make takes only a type argument, no size; use make_raw_deprecated for sized slices")
 		}
-		// make returns @T or @[]T depending on the type
-		if _, ok := typ.(*SliceType); ok {
-			return &ManagedSliceType{Elem: typ.(*SliceType).Elem}
-		}
+		// make([]T) returns @([]T) — managed pointer to a raw slice, NOT @[]T (managed-slice)
 		return &ManagedPtrType{Elem: typ}
 
 	case token.MAKE_RAW_DEPRECATED:
