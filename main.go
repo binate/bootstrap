@@ -21,6 +21,7 @@ func main() {
 
 	// Parse CLI flags
 	var root string
+	var addRoots []string
 	var testMode bool
 	var verbose bool
 	var cpuProfile string
@@ -35,6 +36,11 @@ func main() {
 		}
 		if arg == "-root" && i+1 < len(os.Args) {
 			root = os.Args[i+1]
+			i += 2
+			continue
+		}
+		if arg == "-add-root" && i+1 < len(os.Args) {
+			addRoots = append(addRoots, os.Args[i+1])
 			i += 2
 			continue
 		}
@@ -84,9 +90,9 @@ func main() {
 				os.Exit(1)
 			}
 		}
-		runTests(root, filenames, verbose)
+		runTests(root, addRoots, filenames, verbose)
 	} else {
-		runProgram(root, filenames, progArgs, verbose)
+		runProgram(root, addRoots, filenames, progArgs, verbose)
 	}
 }
 
@@ -97,7 +103,7 @@ func usage() {
 }
 
 // runTests runs Test* functions in the specified packages.
-func runTests(root string, testPkgs []string, verbose bool) {
+func runTests(root string, addRoots []string, testPkgs []string, verbose bool) {
 	var err error
 	if root == "" {
 		root, err = os.Getwd()
@@ -109,6 +115,9 @@ func runTests(root string, testPkgs []string, verbose bool) {
 
 	// Set up loader with test packages enabled
 	ldr := loader.New(root)
+	for _, ar := range addRoots {
+		ldr.AddRoot(ar)
+	}
 	ldr.Verbose = verbose
 	ldr.RegisterBuiltin("pkg/bootstrap")
 	ldr.TestPackages = make(map[string]bool)
@@ -253,7 +262,7 @@ func isTestResultReturn(fd *ast.FuncDecl) bool {
 }
 
 // runProgram runs a Binate program (the normal non-test mode).
-func runProgram(root string, filenames []string, progArgs []string, verbose bool) {
+func runProgram(root string, addRoots []string, filenames []string, progArgs []string, verbose bool) {
 	// Validate all files are in the same directory
 	if len(filenames) > 1 {
 		dir0, err := filepath.Abs(filepath.Dir(filenames[0]))
@@ -317,6 +326,9 @@ func runProgram(root string, filenames []string, progArgs []string, verbose bool
 
 	// Load all imported packages
 	ldr := loader.New(root)
+	for _, ar := range addRoots {
+		ldr.AddRoot(ar)
+	}
 	ldr.Verbose = verbose
 	ldr.RegisterBuiltin("pkg/bootstrap")
 	ldr.LoadImports(merged.Imports)

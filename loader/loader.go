@@ -23,7 +23,8 @@ type Package struct {
 
 // Loader discovers and parses packages from a project root.
 type Loader struct {
-	Root         string              // project root directory
+	Root         string              // primary project root directory
+	Roots        []string            // all search roots (primary + additional)
 	Packages     map[string]*Package // import path -> parsed package
 	Order        []string            // topological order (dependencies first)
 	Errors       []string            // accumulated errors
@@ -36,9 +37,21 @@ type Loader struct {
 func New(root string) *Loader {
 	return &Loader{
 		Root:     root,
+		Roots:    []string{root},
 		Packages: make(map[string]*Package),
 		loading:  make(map[string]bool),
 	}
+}
+
+// AddRoot adds an additional search root for package resolution.
+// Duplicate roots are ignored.
+func (l *Loader) AddRoot(root string) {
+	for _, r := range l.Roots {
+		if r == root {
+			return
+		}
+	}
+	l.Roots = append(l.Roots, root)
 }
 
 // RegisterBuiltin registers a builtin package that has no .bn files on disk.
@@ -79,42 +92,54 @@ func (l *Loader) loadPackage(path string, imp *ast.ImportSpec) {
 		fmt.Fprintf(os.Stderr, "[verbose] loading package %s\n", path)
 	}
 
-	// Discover files
-	bniPath := filepath.Join(l.Root, path+".bni")
-	implDir := filepath.Join(l.Root, path)
-
-	// Parse .bni if it exists
-	if data, err := os.ReadFile(bniPath); err == nil {
-		p := parser.NewInterface(data, bniPath)
-		f := p.ParseFile()
-		if len(p.Errors()) > 0 {
-			for _, e := range p.Errors() {
-				l.Errors = append(l.Errors, e.Error())
+	// Discover files across all roots
+	var bniPath, implDir string
+	for _, searchRoot := range l.Roots {
+		if pkg.BNI == nil {
+			candidate := filepath.Join(searchRoot, path+".bni")
+			if data, err := os.ReadFile(candidate); err == nil {
+				bniPath = candidate
+				p := parser.NewInterface(data, bniPath)
+				f := p.ParseFile()
+				if len(p.Errors()) > 0 {
+					for _, e := range p.Errors() {
+						l.Errors = append(l.Errors, e.Error())
+					}
+					return
+				}
+				declPkg := unquote(f.PkgName.Value)
+				if declPkg != path {
+					l.Errors = append(l.Errors, fmt.Sprintf(
+						"%s: package declaration %q does not match import path %q",
+						bniPath, declPkg, path))
+					return
+				}
+				pkg.BNI = f
+				pkg.Imports = append(pkg.Imports, extractImports(f)...)
 			}
-			return
 		}
-		// Validate package name matches path
-		declPkg := unquote(f.PkgName.Value)
-		if declPkg != path {
-			l.Errors = append(l.Errors, fmt.Sprintf(
-				"%s: package declaration %q does not match import path %q",
-				bniPath, declPkg, path))
-			return
+		if implDir == "" {
+			candidate := filepath.Join(searchRoot, path)
+			if _, err := os.ReadDir(candidate); err == nil {
+				implDir = candidate
+			}
 		}
-		pkg.BNI = f
-		pkg.Imports = append(pkg.Imports, extractImports(f)...)
 	}
 
-	// Parse .bn implementation files
-	entries, err := os.ReadDir(implDir)
-	if err != nil && pkg.BNI == nil {
+	if pkg.BNI == nil && implDir == "" {
+		// Build error message using primary root
+		primaryBni := filepath.Join(l.Root, path+".bni")
+		primaryDir := filepath.Join(l.Root, path)
 		l.Errors = append(l.Errors, fmt.Sprintf("package %q not found: no %s or %s/",
-			path, bniPath, implDir))
+			path, primaryBni, primaryDir))
 		return
 	}
 
+	// Parse .bn implementation files
 	var bnFiles []*ast.File
-	if err == nil {
+	if implDir != "" {
+		entries, err := os.ReadDir(implDir)
+		if err == nil {
 		// Sort entries for deterministic order
 		sort.Slice(entries, func(i, j int) bool {
 			return entries[i].Name() < entries[j].Name()
@@ -153,7 +178,8 @@ func (l *Loader) loadPackage(path string, imp *ast.ImportSpec) {
 			bnFiles = append(bnFiles, f)
 			pkg.Imports = append(pkg.Imports, extractImports(f)...)
 		}
-	}
+		} // err == nil
+	} // implDir != ""
 
 	if l.Verbose {
 		fmt.Fprintf(os.Stderr, "[verbose]   %s: %d .bn files, bni=%v\n", path, len(bnFiles), pkg.BNI != nil)
