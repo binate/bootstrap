@@ -17,12 +17,18 @@ type Value interface {
 
 // copyValue returns a shallow copy of struct and array values.
 // Other value types (int, bool, string, slice, pointer) are left as-is.
+// For managed slices, shares the backing and increments refcount.
 func copyValue(v Value) Value {
 	switch val := v.(type) {
 	case *StructVal:
 		return val.Copy()
 	case *ArrayVal:
 		return val.Copy()
+	case *SliceVal:
+		if val.HeapObj != nil {
+			val.HeapObj.Refcount++
+		}
+		return v
 	default:
 		return v
 	}
@@ -88,9 +94,11 @@ func (v *ManagedPtrVal) String() string {
 }
 
 // SliceVal represents a slice value (raw or managed).
+// For managed slices (@[]T), HeapObj tracks the refcounted backing allocation.
 type SliceVal struct {
-	Elems []Value
-	Typ   types.Type // the slice type
+	Elems   []Value
+	Typ     types.Type // the slice type
+	HeapObj *HeapObject
 }
 
 func (v *SliceVal) Type() types.Type { return v.Typ }

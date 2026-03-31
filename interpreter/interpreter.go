@@ -188,7 +188,12 @@ func (interp *Interpreter) registerBuiltins() {
 			// Use Go's built-in append for geometric growth — avoids O(n²)
 			// copying when building strings character by character.
 			newElems := append(sv.Elems, args[1:]...)
-			return &SliceVal{Elems: newElems, Typ: sv.Typ}
+			result := &SliceVal{Elems: newElems, Typ: sv.Typ}
+			// Preserve managed-slice semantics: append on @[]T returns @[]T with HeapObj
+			if sv.HeapObj != nil {
+				result.HeapObj = &HeapObject{Refcount: 1}
+			}
+			return result
 		},
 	})
 	// panic
@@ -1692,8 +1697,9 @@ func (interp *Interpreter) evalMakeSlice(e *ast.BuiltinCall) Value {
 		elems[i] = ZeroValue(elemType)
 	}
 	return &SliceVal{
-		Elems: elems,
-		Typ:   &types.ManagedSliceType{Elem: elemType},
+		Elems:   elems,
+		Typ:     &types.ManagedSliceType{Elem: elemType},
+		HeapObj: &HeapObject{Refcount: 1},
 	}
 }
 
@@ -1796,6 +1802,15 @@ func (interp *Interpreter) coerce(v Value, target types.Type) Value {
 		if _, ok := target.(*types.NamedType); ok {
 			if it, ok := target.(*types.NamedType).Underlying_.(*types.IntType); ok {
 				return &IntVal{Val: iv.Val, Typ: it}
+			}
+		}
+	}
+
+	// @[]T → []T: strip managed-ness, share elements
+	if sv, ok := v.(*SliceVal); ok {
+		if _, isManagedSlice := sv.Typ.(*types.ManagedSliceType); isManagedSlice {
+			if st, isRawSlice := target.(*types.SliceType); isRawSlice {
+				return &SliceVal{Elems: sv.Elems, Typ: st}
 			}
 		}
 	}
