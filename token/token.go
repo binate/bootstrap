@@ -45,7 +45,6 @@ const (
 	// Builtin keywords (special syntax — take types as arguments)
 	builtinStart
 	MAKE
-	MAKE_RAW_DEPRECATED
 	MAKE_SLICE
 	BOX
 	CAST
@@ -138,9 +137,8 @@ var typeNames = [...]string{
 	TYPE:      "type",
 	VAR:       "var",
 
-	MAKE:                "make",
-	MAKE_RAW_DEPRECATED: "make_raw_deprecated",
-	MAKE_SLICE:          "make_slice",
+	MAKE:       "make",
+	MAKE_SLICE: "make_slice",
 	BOX:                 "box",
 	CAST:         "cast",
 	BIT_CAST:     "bit_cast",

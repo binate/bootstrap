@@ -428,8 +428,6 @@ func (p *Parser) parsePrimaryExpr() ast.Expr {
 	// Builtin keywords
 	case token.MAKE:
 		return p.parseMakeCall()
-	case token.MAKE_RAW_DEPRECATED:
-		return p.parseMakeRawDeprecatedCall()
 	case token.MAKE_SLICE:
 		return p.parseMakeSliceCall()
 	case token.BOX:
@@ -607,22 +605,6 @@ func (p *Parser) parseMakeCall() *ast.BuiltinCall {
 	typ := p.parseType()
 	p.expect(token.RPAREN)
 	return &ast.BuiltinCall{BuiltinPos: pos, Builtin: token.MAKE, Type: typ}
-}
-
-func (p *Parser) parseMakeRawDeprecatedCall() *ast.BuiltinCall {
-	pos := p.tok.Pos
-	p.next() // consume make_raw_deprecated
-	p.expect(token.LPAREN)
-
-	// Same syntax as make: SliceType "," Expression
-	typ := p.parseType()
-	var args []ast.Expr
-	if p.tok.Type == token.COMMA {
-		p.next()
-		args = append(args, p.parseExpr())
-	}
-	p.expect(token.RPAREN)
-	return &ast.BuiltinCall{BuiltinPos: pos, Builtin: token.MAKE_RAW_DEPRECATED, Type: typ, Args: args}
 }
 
 func (p *Parser) parseMakeSliceCall() *ast.BuiltinCall {
