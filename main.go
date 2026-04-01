@@ -62,6 +62,10 @@ func main() {
 		filenames = append(filenames, arg)
 		i++
 	}
+	// Expand directory arguments: if a filename is a directory, replace it
+	// with all .bn files in that directory (excluding _test.bn files).
+	filenames = expandDirArgs(filenames)
+
 	if len(filenames) == 0 {
 		usage()
 	}
@@ -97,9 +101,40 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: binate [-v] [-root dir] <file.bn> [file2.bn ...] [-- args...]\n")
+	fmt.Fprintf(os.Stderr, "usage: binate [-v] [-root dir] <file.bn|dir> [file2.bn ...] [-- args...]\n")
 	fmt.Fprintf(os.Stderr, "       binate [-v] -test [-root dir] <pkg/foo> [pkg/bar ...]\n")
 	os.Exit(1)
+}
+
+// expandDirArgs expands any directory arguments into the .bn files they contain,
+// excluding _test.bn files. Non-directory arguments are passed through unchanged.
+func expandDirArgs(args []string) []string {
+	var result []string
+	for _, arg := range args {
+		info, err := os.Stat(arg)
+		if err != nil || !info.IsDir() {
+			result = append(result, arg)
+			continue
+		}
+		entries, err := os.ReadDir(arg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error reading directory %s: %s\n", arg, err)
+			os.Exit(1)
+		}
+		var found int
+		for _, e := range entries {
+			name := e.Name()
+			if strings.HasSuffix(name, ".bn") && !strings.HasSuffix(name, "_test.bn") {
+				result = append(result, filepath.Join(arg, name))
+				found++
+			}
+		}
+		if found == 0 {
+			fmt.Fprintf(os.Stderr, "error: directory %s contains no .bn files\n", arg)
+			os.Exit(1)
+		}
+	}
+	return result
 }
 
 // runTests runs Test* functions in the specified packages.
