@@ -62,9 +62,11 @@ func main() {
 		filenames = append(filenames, arg)
 		i++
 	}
-	// Expand directory arguments: if a filename is a directory, replace it
-	// with all .bn files in that directory (excluding _test.bn files).
-	filenames = expandDirArgs(filenames)
+	// Expand directory arguments for non-test mode.
+	// Test mode handles directories separately via runDirTests.
+	if !testMode {
+		filenames = expandDirArgs(filenames)
+	}
 
 	if len(filenames) == 0 {
 		usage()
@@ -82,19 +84,40 @@ func main() {
 	}
 
 	if testMode {
-		// Validate that test arguments are package paths, not file paths
+		// Check if any argument is a directory (main package test mode)
+		var dirArgs []string
+		var pkgArgs []string
 		for _, arg := range filenames {
-			if strings.HasSuffix(arg, ".bn") || strings.HasSuffix(arg, ".bni") {
-				fmt.Fprintf(os.Stderr, "error: -test takes package paths, not files: %s\n", arg)
-				fmt.Fprintf(os.Stderr, "  use: binate -test [-root dir] pkg/foo\n")
-				os.Exit(1)
-			}
-			if filepath.IsAbs(arg) {
-				fmt.Fprintf(os.Stderr, "error: -test takes package paths (e.g. pkg/foo), not absolute paths: %s\n", arg)
-				os.Exit(1)
+			info, err := os.Stat(arg)
+			if err == nil && info.IsDir() {
+				dirArgs = append(dirArgs, arg)
+			} else {
+				pkgArgs = append(pkgArgs, arg)
 			}
 		}
-		runTests(root, addRoots, filenames, verbose)
+		if len(dirArgs) > 0 && len(pkgArgs) > 0 {
+			fmt.Fprintf(os.Stderr, "error: cannot mix directory and package path arguments in -test mode\n")
+			os.Exit(1)
+		}
+		if len(dirArgs) > 0 {
+			for _, dir := range dirArgs {
+				runDirTests(root, addRoots, dir, verbose)
+			}
+		} else {
+			// Validate that test arguments are package paths, not file paths
+			for _, arg := range pkgArgs {
+				if strings.HasSuffix(arg, ".bn") || strings.HasSuffix(arg, ".bni") {
+					fmt.Fprintf(os.Stderr, "error: -test takes package paths, not files: %s\n", arg)
+					fmt.Fprintf(os.Stderr, "  use: binate -test [-root dir] pkg/foo\n")
+					os.Exit(1)
+				}
+				if filepath.IsAbs(arg) {
+					fmt.Fprintf(os.Stderr, "error: -test takes package paths (e.g. pkg/foo), not absolute paths: %s\n", arg)
+					os.Exit(1)
+				}
+			}
+			runTests(root, addRoots, pkgArgs, verbose)
+		}
 	} else {
 		runProgram(root, addRoots, filenames, progArgs, verbose)
 	}
@@ -135,6 +158,161 @@ func expandDirArgs(args []string) []string {
 		}
 	}
 	return result
+}
+
+// runDirTests runs Test* functions in a main package directory.
+// It loads all .bn files (including _test.bn) from the directory.
+func runDirTests(root string, addRoots []string, dir string, verbose bool) {
+	// Collect all .bn files in the directory (including _test.bn)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error reading directory %s: %s\n", dir, err)
+		os.Exit(1)
+	}
+	var filenames []string
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasSuffix(name, ".bn") {
+			filenames = append(filenames, filepath.Join(dir, name))
+		}
+	}
+	if len(filenames) == 0 {
+		fmt.Fprintf(os.Stderr, "error: directory %s contains no .bn files\n", dir)
+		os.Exit(1)
+	}
+
+	// Parse all files
+	var files []*ast.File
+	hasErrors := false
+	for _, filename := range filenames {
+		src, err := os.ReadFile(filename)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s\n", err)
+			os.Exit(1)
+		}
+		p := parser.New(src, filename)
+		f := p.ParseFile()
+		if len(p.Errors()) > 0 {
+			for _, e := range p.Errors() {
+				fmt.Fprintf(os.Stderr, "%s\n", e)
+			}
+			hasErrors = true
+		}
+		files = append(files, f)
+	}
+	if hasErrors {
+		os.Exit(1)
+	}
+
+	// Merge
+	merged, err := loader.MergeFiles(files)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %s\n", err)
+		os.Exit(1)
+	}
+
+	// Project root
+	if root == "" {
+		root, err = os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// Load imports
+	ldr := loader.New(root)
+	for _, ar := range addRoots {
+		ldr.AddRoot(ar)
+	}
+	ldr.Verbose = verbose
+	ldr.RegisterBuiltin("pkg/bootstrap")
+	ldr.LoadImports(merged.Imports)
+	if len(ldr.Errors) > 0 {
+		for _, e := range ldr.Errors {
+			fmt.Fprintf(os.Stderr, "%s\n", e)
+		}
+		os.Exit(1)
+	}
+
+	// Type check imported packages
+	c := types.NewChecker()
+	c.Verbose = verbose
+	for _, pkgPath := range ldr.Order {
+		pkg := ldr.Packages[pkgPath]
+		if pkg.Builtin {
+			continue
+		}
+		if pkg.BNI != nil {
+			c.LoadPackageInterface(pkgPath, pkg.BNI)
+		}
+		if pkg.Merged != nil {
+			c.CheckPackage(pkgPath, pkg.Merged)
+		}
+	}
+	// Type check the main package
+	c.CheckPackage("main", merged)
+	if len(c.Errors()) > 0 {
+		for _, e := range c.Errors() {
+			fmt.Fprintf(os.Stderr, "%s\n", e)
+		}
+		os.Exit(1)
+	}
+
+	// Load packages in interpreter
+	interp := interpreter.New()
+	interp.Verbose = verbose
+	for _, pkgPath := range ldr.Order {
+		pkg := ldr.Packages[pkgPath]
+		if pkg.Builtin || pkg.Merged == nil {
+			continue
+		}
+		interp.LoadPackage(pkgPath, pkg.Merged, c)
+	}
+	// Load the main package
+	interp.LoadPackage("main", merged, c)
+
+	// Discover and run Test* functions
+	var testNames []string
+	for _, d := range merged.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		if !strings.HasPrefix(fd.Name.Name, "Test") || fd.Body == nil {
+			continue
+		}
+		if len(fd.Params) == 0 && isTestResultReturn(fd) {
+			testNames = append(testNames, fd.Name.Name)
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: %s has Test prefix but wrong signature (want TestXxx() testing.TestResult)\n", fd.Name.Name)
+		}
+	}
+
+	if len(testNames) == 0 {
+		fmt.Printf("?   \t%s\t[no test functions]\n", dir)
+		return
+	}
+
+	passed, failed := 0, 0
+	for _, name := range testNames {
+		fmt.Printf("=== RUN   %s\n", name)
+		errMsg := interp.RunTestFunc("main", name)
+		if errMsg != "" {
+			fmt.Printf("--- FAIL: %s\n    %s\n", name, errMsg)
+			failed++
+		} else {
+			fmt.Printf("--- PASS: %s\n", name)
+			passed++
+		}
+	}
+
+	fmt.Println()
+	if failed > 0 {
+		fmt.Printf("FAIL\t%d passed, %d failed\n", passed, failed)
+		os.Exit(1)
+	}
+	fmt.Printf("ok\t%d passed\n", passed)
 }
 
 // runTests runs Test* functions in the specified packages.
