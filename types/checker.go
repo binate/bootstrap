@@ -191,7 +191,6 @@ func (c *Checker) universeScope() *Scope {
 	variadicType := &FuncType{} // empty signature — checked specially
 	s.define(&Symbol{Name: "print", Type: variadicType, Kind: FuncSym})
 	s.define(&Symbol{Name: "println", Type: variadicType, Kind: FuncSym})
-	s.define(&Symbol{Name: "append", Type: variadicType, Kind: FuncSym})
 	s.define(&Symbol{Name: "panic", Type: variadicType, Kind: FuncSym})
 	return s
 }
@@ -1097,10 +1096,6 @@ func (c *Checker) checkCallExpr(e *ast.CallExpr) Type {
 		// Infer return type for known variadic builtins
 		name := callFuncName(e)
 		switch name {
-		case "append":
-			if len(e.Args) > 0 {
-				return c.checkExpr(e.Args[0])
-			}
 		case "string", "bootstrap.string":
 			return Typ_string
 		}

@@ -166,36 +166,6 @@ func (interp *Interpreter) registerBuiltins() {
 			return &NilVal{}
 		},
 	})
-	// append: append(slice, elems...) -> new slice
-	interp.env.define("append", &BuiltinFuncVal{
-		Name: "append",
-		Fn: func(args []Value) Value {
-			if len(args) < 2 {
-				panic("append requires at least 2 arguments")
-			}
-			sv, ok := args[0].(*SliceVal)
-			if !ok {
-				// Handle nil append: append(nil, x) creates a new slice
-				if _, isNil := args[0].(*NilVal); isNil {
-					newElems := make([]Value, 0, len(args)-1)
-					for _, a := range args[1:] {
-						newElems = append(newElems, a)
-					}
-					return &SliceVal{Elems: newElems}
-				}
-				panic(fmt.Sprintf("append: first argument must be a slice, got %T", args[0]))
-			}
-			// Use Go's built-in append for geometric growth — avoids O(n²)
-			// copying when building strings character by character.
-			newElems := append(sv.Elems, args[1:]...)
-			result := &SliceVal{Elems: newElems, Typ: sv.Typ}
-			// Preserve managed-slice semantics: append on @[]T returns @[]T with HeapObj
-			if sv.HeapObj != nil {
-				result.HeapObj = &HeapObject{Refcount: 1}
-			}
-			return result
-		},
-	})
 	// panic
 	interp.env.define("panic", &BuiltinFuncVal{
 		Name: "panic",
