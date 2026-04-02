@@ -277,7 +277,7 @@ func TestCheckMakeSlice(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	var s @[]int = make([]int, 10)
+	var s @[]int = make_slice(int, 10)
 	s = s
 }
 `

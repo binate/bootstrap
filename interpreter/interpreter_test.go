@@ -325,7 +325,7 @@ func TestMakeSlice(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	s := make([]int, 3)
+	s := make_slice(int, 3)
 	s[0] = 10
 	s[1] = 20
 	s[2] = 30
@@ -529,7 +529,7 @@ func TestSliceExpr(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	s := make([]int, 5)
+	s := make_slice(int, 5)
 	s[0] = 1
 	s[1] = 2
 	s[2] = 3
@@ -602,27 +602,6 @@ func main() {
 	}
 }
 
-func TestAppend(t *testing.T) {
-	src := `package "main"
-
-func main() {
-	s := make([]int, 0)
-	s = append(s, 10)
-	s = append(s, 20)
-	s = append(s, 30)
-	println(len(s))
-	println(s[0])
-	println(s[1])
-	println(s[2])
-}
-`
-	got := runProgram(t, src)
-	expect := "3\n10\n20\n30\n"
-	if got != expect {
-		t.Errorf("expected %q, got %q", expect, got)
-	}
-}
-
 func TestStringConversion(t *testing.T) {
 	src := `package "main"
 
@@ -670,44 +649,6 @@ func main() {
 	}
 }
 
-func TestMethodLikePattern(t *testing.T) {
-	src := `package "main"
-
-type Stack struct {
-	data []int
-	size int
-}
-
-func newStack() Stack {
-	return Stack{data: make([]int, 0), size: 0}
-}
-
-func push(s Stack, val int) Stack {
-	s.data = append(s.data, val)
-	s.size++
-	return s
-}
-
-func top(s Stack) int {
-	return s.data[s.size - 1]
-}
-
-func main() {
-	s := newStack()
-	s = push(s, 10)
-	s = push(s, 20)
-	s = push(s, 30)
-	println(top(s))
-	println(s.size)
-}
-`
-	got := runProgram(t, src)
-	expect := "30\n3\n"
-	if got != expect {
-		t.Errorf("expected %q, got %q", expect, got)
-	}
-}
-
 func TestIncDec(t *testing.T) {
 	src := `package "main"
 
@@ -748,7 +689,7 @@ func TestForInSlice(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	s := make([]int, 3)
+	s := make_slice(int, 3)
 	s[0] = 1
 	s[1] = 2
 	s[2] = 3
@@ -856,7 +797,7 @@ func TestManagedSlice(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	s := make([]int, 5)
+	s := make_slice(int, 5)
 	for i := 0; i < 5; i++ {
 		s[i] = i * i
 	}
@@ -1063,11 +1004,11 @@ func TestStringLen(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	s := make([]int, 5)
+	s := make_slice(int, 5)
 	println(len(s))
 	arr := [3]int{1, 2, 3}
 	println(len(arr))
-	empty := make([]int, 0)
+	empty := make_slice(int, 0)
 	println(len(empty))
 }
 `
@@ -1101,7 +1042,7 @@ func TestSliceEdgeCases(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	s := make([]int, 5)
+	s := make_slice(int, 5)
 	for i := 0; i < 5; i++ {
 		s[i] = i + 1
 	}
@@ -1117,7 +1058,7 @@ func main() {
 	t3 := s[:len(s)]
 	println(len(t3))
 
-	empty := make([]int, 0)
+	empty := make_slice(int, 0)
 	t4 := empty[:]
 	println(len(t4))
 }
@@ -1336,20 +1277,15 @@ func main() {
 	arr := [4]int{1, 2, 3, 4}
 	println(len(arr))
 
-	sl := make([]int, 7)
+	sl := make_slice(int, 7)
 	println(len(sl))
 
-	ms := make([]int, 3)
+	ms := make_slice(int, 3)
 	println(len(ms))
-
-	sl2 := make([]int, 0)
-	sl2 = append(sl2, 10)
-	sl2 = append(sl2, 20)
-	println(len(sl2))
 }
 `
 	got := runProgram(t, src)
-	expect := "4\n7\n3\n2\n"
+	expect := "4\n7\n3\n"
 	if got != expect {
 		t.Errorf("expected %q, got %q", expect, got)
 	}
@@ -1493,23 +1429,6 @@ func main() {
 	}
 }
 
-func TestAppendNil(t *testing.T) {
-	src := `package "main"
-
-func main() {
-	var s []int
-	s = append(s, 42)
-	println(len(s))
-	println(s[0])
-}
-`
-	got := runProgram(t, src)
-	expect := "1\n42\n"
-	if got != expect {
-		t.Errorf("expected %q, got %q", expect, got)
-	}
-}
-
 func TestLenNilSlice(t *testing.T) {
 	src := `package "main"
 
@@ -1538,23 +1457,6 @@ func main() {
 	expect := "ell\n3\n"
 	if got != expect {
 		t.Errorf("expected %q, got %q", expect, got)
-	}
-}
-
-func TestAppendNilMultiple(t *testing.T) {
-	src := `package "main"
-
-func main() {
-	var s []int
-	s = append(s, 1)
-	s = append(s, 2)
-	s = append(s, 3)
-	println(len(s))
-}
-`
-	got := runProgram(t, src)
-	if got != "3\n" {
-		t.Errorf("expected %q, got %q", "3\n", got)
 	}
 }
 

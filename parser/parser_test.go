@@ -515,19 +515,19 @@ func TestParseMakePointer(t *testing.T) {
 }
 
 func TestParseMakeSlice(t *testing.T) {
-	p := parse(t, "make([]int, 10)")
+	p := parse(t, "make_slice(int, 10)")
 	expr := p.ParseExpr()
 	noErrors(t, p)
 	bc, ok := expr.(*ast.BuiltinCall)
 	if !ok {
 		t.Fatalf("expected *ast.BuiltinCall, got %T", expr)
 	}
-	if bc.Builtin != token.MAKE {
-		t.Errorf("expected MAKE, got %s", bc.Builtin)
+	if bc.Builtin != token.MAKE_SLICE {
+		t.Errorf("expected MAKE_SLICE, got %s", bc.Builtin)
 	}
-	_, ok = bc.Type.(*ast.SliceType)
+	_, ok = bc.Type.(*ast.NamedType)
 	if !ok {
-		t.Fatalf("expected *ast.SliceType, got %T", bc.Type)
+		t.Fatalf("expected *ast.NamedType for element type, got %T", bc.Type)
 	}
 	if len(bc.Args) != 1 {
 		t.Fatalf("expected 1 arg, got %d", len(bc.Args))
