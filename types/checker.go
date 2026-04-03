@@ -394,10 +394,18 @@ func (c *Checker) collectDecls(decls []ast.Decl) {
 	// types can resolve during the main collection pass.
 	c.preRegisterTypeNames(decls)
 
+	// Track which function names are newly declared in this pass,
+	// so we can detect duplicates without flagging .bni re-definitions.
+	declaredFuncs := make(map[string]bool)
+
 	for _, d := range decls {
 		switch d := d.(type) {
 		case *ast.FuncDecl:
 			ft := c.resolveFuncType(d)
+			if declaredFuncs[d.Name.Name] {
+				c.errorf(d.Name.Pos(), "%s redeclared in this block", d.Name.Name)
+			}
+			declaredFuncs[d.Name.Name] = true
 			c.scope.define(&Symbol{Name: d.Name.Name, Type: ft, Kind: FuncSym})
 		case *ast.TypeDecl:
 			c.collectTypeDecl(d)

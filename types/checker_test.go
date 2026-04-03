@@ -636,3 +636,57 @@ func main() {
 	c := checkFile(t, src)
 	expectNoErrors(t, c)
 }
+
+func TestCheckDuplicateFunc(t *testing.T) {
+	src := `package "main"
+
+func foo() int { return 1 }
+func foo() int { return 2 }
+`
+	c := checkFile(t, src)
+	expectError(t, c, "redeclared")
+}
+
+func TestCheckDuplicateFuncNotTriggeredByBni(t *testing.T) {
+	// A function declared in .bni and defined in .bn should not trigger redeclaration
+	bniSrc := `package "pkg/test"
+func Foo() int
+`
+	bnSrc := `package "pkg/test"
+func Foo() int { return 42 }
+`
+	c := NewChecker()
+	bniP := parser.NewInterface([]byte(bniSrc), "test.bni")
+	bniF := bniP.ParseFile()
+	if len(bniP.Errors()) > 0 {
+		t.Fatalf("bni parse error: %s", bniP.Errors()[0])
+	}
+	c.LoadPackageInterface("pkg/test", bniF)
+
+	bnP := parser.New([]byte(bnSrc), "test.bn")
+	bnF := bnP.ParseFile()
+	if len(bnP.Errors()) > 0 {
+		t.Fatalf("bn parse error: %s", bnP.Errors()[0])
+	}
+	c.CheckPackage("pkg/test", bnF)
+	expectNoErrors(t, c)
+}
+
+func TestCheckDuplicateConstInGroup(t *testing.T) {
+	// Constants in a const() group should not trigger redeclaration
+	src := `package "main"
+
+const (
+	A int = 1
+	B int = 2
+	C int = 3
+)
+
+func main() {
+	var x int = A + B + C
+	x = x
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
