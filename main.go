@@ -451,7 +451,7 @@ func runTests(root string, addRoots []string, testPkgs []string, verbose bool) {
 }
 
 // isTestResultReturn checks whether a function has a single return type
-// that is testing.TestResult (or equivalently []char).
+// that is testing.TestResult (or equivalently @[]char).
 func isTestResultReturn(fd *ast.FuncDecl) bool {
 	if len(fd.Results) != 1 {
 		return false
@@ -463,7 +463,15 @@ func isTestResultReturn(fd *ast.FuncDecl) bool {
 			return true
 		}
 	}
-	// Accept []char directly
+	// Accept @[]char directly
+	if ms, ok := r.(*ast.ManagedSliceType); ok {
+		if nt, ok := ms.Elem.(*ast.NamedType); ok {
+			if nt.Pkg == nil && nt.Name.Name == "char" {
+				return true
+			}
+		}
+	}
+	// Accept []char directly (legacy)
 	if st, ok := r.(*ast.SliceType); ok {
 		if nt, ok := st.Elem.(*ast.NamedType); ok {
 			if nt.Pkg == nil && nt.Name.Name == "char" {

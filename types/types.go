@@ -388,6 +388,10 @@ func AssignableTo(src, dst Type) bool {
 		return true
 	}
 
+	// Resolve aliases for structural checks below.
+	src = ResolveAlias(src)
+	dst = ResolveAlias(dst)
+
 	// Untyped constants are assignable to their concrete counterparts.
 	if _, ok := src.(*UntypedIntType); ok {
 		return IsInteger(dst)
@@ -412,6 +416,13 @@ func AssignableTo(src, dst Type) bool {
 	if ms, ok := src.(*ManagedSliceType); ok {
 		if rs, ok := dst.(*SliceType); ok {
 			return Identical(ms.Elem, rs.Elem)
+		}
+	}
+
+	// []T is implicitly convertible to @[]T (raw → managed slice).
+	if rs, ok := src.(*SliceType); ok {
+		if ms, ok := dst.(*ManagedSliceType); ok {
+			return Identical(rs.Elem, ms.Elem)
 		}
 	}
 
