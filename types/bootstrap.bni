@@ -19,7 +19,7 @@ func Exec(program []char, args [][]char) int
 func Itoa(v int) []char
 
 // String operations
-func Concat(a []char, b []char) []char
+func Concat(a []char, b []char) @[]char
 
 // File open flags
 const O_RDONLY int = 0

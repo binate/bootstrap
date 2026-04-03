@@ -419,13 +419,6 @@ func AssignableTo(src, dst Type) bool {
 		}
 	}
 
-	// []T is implicitly convertible to @[]T (raw → managed slice).
-	if rs, ok := src.(*SliceType); ok {
-		if ms, ok := dst.(*ManagedSliceType); ok {
-			return Identical(rs.Elem, ms.Elem)
-		}
-	}
-
 	// string ↔ []char / @[]char interchangeability (bootstrap convenience).
 	// In real Binate, string literals are []const char. The bootstrap lacks
 	// const types, so string and []char/@[]char are treated as interchangeable.
