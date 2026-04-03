@@ -108,7 +108,7 @@ func (l *Loader) loadPackage(path string, imp *ast.ImportSpec) {
 					return
 				}
 				declPkg := unquote(f.PkgName.Value)
-				if declPkg != path {
+				if declPkg != path && declPkg != "main" {
 					l.Errors = append(l.Errors, fmt.Sprintf(
 						"%s: package declaration %q does not match import path %q",
 						bniPath, declPkg, path))
@@ -167,19 +167,32 @@ func (l *Loader) loadPackage(path string, imp *ast.ImportSpec) {
 				}
 				return
 			}
-			// Validate package name
-			declPkg := unquote(f.PkgName.Value)
-			if declPkg != path {
-				l.Errors = append(l.Errors, fmt.Sprintf(
-					"%s: package declaration %q does not match import path %q",
-					filePath, declPkg, path))
-				return
-			}
 			bnFiles = append(bnFiles, f)
 			pkg.Imports = append(pkg.Imports, extractImports(f)...)
 		}
 		} // err == nil
 	} // implDir != ""
+
+	// Validate package names: all files must agree, and must match the import
+	// path or all be "main".
+	if len(bnFiles) > 0 {
+		firstPkg := unquote(bnFiles[0].PkgName.Value)
+		for _, f := range bnFiles[1:] {
+			declPkg := unquote(f.PkgName.Value)
+			if declPkg != firstPkg {
+				l.Errors = append(l.Errors, fmt.Sprintf(
+					"%s: package declaration %q does not match %q from other files in package",
+					f.PkgName.Pos(), declPkg, firstPkg))
+				return
+			}
+		}
+		if firstPkg != path && firstPkg != "main" {
+			l.Errors = append(l.Errors, fmt.Sprintf(
+				"package declaration %q does not match import path %q",
+				firstPkg, path))
+			return
+		}
+	}
 
 	if l.Verbose {
 		fmt.Fprintf(os.Stderr, "[verbose]   %s: %d .bn files, bni=%v\n", path, len(bnFiles), pkg.BNI != nil)
