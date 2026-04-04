@@ -473,10 +473,8 @@ func TestCheckNilAssignment(t *testing.T) {
 func main() {
 	var p *int = nil
 	var mp @int = nil
-	var s []int = nil
 	p = p
 	mp = mp
-	s = s
 }
 `
 	c := checkFile(t, src)
@@ -685,6 +683,59 @@ const (
 func main() {
 	var x int = A + B + C
 	x = x
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+func TestCheckSliceNilCompareRejected(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var s []int
+	if s == nil {
+	}
+}
+`
+	c := checkFile(t, src)
+	expectError(t, c, "cannot compare")
+}
+
+func TestCheckSliceNilAssignRejected(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var s []int = nil
+}
+`
+	c := checkFile(t, src)
+	expectError(t, c, "cannot assign")
+}
+
+func TestCheckManagedSliceNilRejected(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var s @[]int = nil
+	if s == nil {
+	}
+}
+`
+	c := checkFile(t, src)
+	expectError(t, c, "cannot")
+}
+
+func TestCheckPointerNilStillAllowed(t *testing.T) {
+	src := `package "main"
+
+func main() {
+	var p *int = nil
+	if p == nil {
+	}
+	var mp @int = nil
+	if mp == nil {
+	}
 }
 `
 	c := checkFile(t, src)

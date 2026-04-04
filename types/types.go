@@ -378,7 +378,7 @@ func IsSlice(t Type) bool {
 
 // IsNillable reports whether t can be assigned nil.
 func IsNillable(t Type) bool {
-	return IsPointer(t) || IsSlice(t)
+	return IsPointer(t)
 }
 
 // AssignableTo reports whether a value of type src can be assigned to a
