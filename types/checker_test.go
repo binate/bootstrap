@@ -741,3 +741,62 @@ func main() {
 	c := checkFile(t, src)
 	expectNoErrors(t, c)
 }
+
+func TestIdenticalAnonymousStructs(t *testing.T) {
+	a := &StructType{Fields: []*Field{
+		{Name: "X", Type: Typ_int},
+		{Name: "Y", Type: Typ_int},
+	}}
+	b := &StructType{Fields: []*Field{
+		{Name: "X", Type: Typ_int},
+		{Name: "Y", Type: Typ_int},
+	}}
+	if !Identical(a, b) {
+		t.Error("anonymous structs with same fields should be identical")
+	}
+	c := &StructType{Fields: []*Field{
+		{Name: "A", Type: Typ_int},
+		{Name: "B", Type: Typ_int},
+	}}
+	if Identical(a, c) {
+		t.Error("different field names should not be identical")
+	}
+	d := &StructType{Fields: []*Field{
+		{Name: "X", Type: Typ_int},
+		{Name: "Y", Type: Typ_bool},
+	}}
+	if Identical(a, d) {
+		t.Error("different field types should not be identical")
+	}
+}
+
+func TestAnonymousStructParam(t *testing.T) {
+	src := `package "test"
+func printPoint(p struct { X int; Y int }) {
+	println(p.X)
+}
+func main() {
+	var p struct { X int; Y int }
+	p.X = 1
+	printPoint(p)
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+func TestAnonymousStructReturn(t *testing.T) {
+	src := `package "test"
+func makePoint() struct { X int; Y int } {
+	var p struct { X int; Y int }
+	p.X = 5
+	return p
+}
+func main() {
+	var p struct { X int; Y int } = makePoint()
+	println(p.X)
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}

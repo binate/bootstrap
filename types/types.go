@@ -295,6 +295,26 @@ func Identical(a, b Type) bool {
 		if bt, ok := b.(*ArrayType); ok {
 			return at.Len == bt.Len && Identical(at.Elem, bt.Elem)
 		}
+	case *StructType:
+		if bt, ok := b.(*StructType); ok {
+			// Named structs: identical iff same name
+			if at.Name != "" || bt.Name != "" {
+				return at.Name == bt.Name
+			}
+			// Anonymous structs: structural equivalence (names + types in order)
+			if len(at.Fields) != len(bt.Fields) {
+				return false
+			}
+			for i := range at.Fields {
+				if at.Fields[i].Name != bt.Fields[i].Name {
+					return false
+				}
+				if !Identical(at.Fields[i].Type, bt.Fields[i].Type) {
+					return false
+				}
+			}
+			return true
+		}
 	case *FuncType:
 		if bt, ok := b.(*FuncType); ok {
 			if len(at.Params) != len(bt.Params) || len(at.Results) != len(bt.Results) {
