@@ -79,7 +79,10 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error creating profile: %s\n", err)
 			os.Exit(1)
 		}
-		pprof.StartCPUProfile(f)
+		if err := pprof.StartCPUProfile(f); err != nil {
+			fmt.Fprintf(os.Stderr, "error starting profile: %s\n", err)
+			os.Exit(1)
+		}
 		defer pprof.StopCPUProfile()
 	}
 

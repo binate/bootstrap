@@ -23,14 +23,6 @@ func makeFile(pkg string, imports ...string) *ast.File {
 	return f
 }
 
-// helper to build an ast.File with a package name and declarations
-func makeFileWithDecls(pkg string, decls []ast.Decl) *ast.File {
-	return &ast.File{
-		PkgName: &ast.StringLit{Value: `"` + pkg + `"`},
-		Decls:   decls,
-	}
-}
-
 // ============================================================
 // MergeFiles
 // ============================================================
@@ -278,20 +270,28 @@ func TestCycleDetection_SelfImport(t *testing.T) {
 	// because it checks l.Packages before recursing.
 	aDir := filepath.Join(tmp, "pkg", "a")
 	bDir := filepath.Join(tmp, "pkg", "b")
-	os.MkdirAll(aDir, 0o755)
-	os.MkdirAll(bDir, 0o755)
+	if err := os.MkdirAll(aDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(bDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
-	os.WriteFile(filepath.Join(aDir, "a.bn"), []byte(`package "pkg/a"
+	if err := os.WriteFile(filepath.Join(aDir, "a.bn"), []byte(`package "pkg/a"
 import "pkg/b"
 
 func hello() {}
-`), 0o644)
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
-	os.WriteFile(filepath.Join(bDir, "b.bn"), []byte(`package "pkg/b"
+	if err := os.WriteFile(filepath.Join(bDir, "b.bn"), []byte(`package "pkg/b"
 import "pkg/a"
 
 func world() {}
-`), 0o644)
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	l := New(tmp)
 	imports := []*ast.ImportSpec{
@@ -344,13 +344,17 @@ func TestPackageNameMismatch_BNFile(t *testing.T) {
 	tmp := t.TempDir()
 
 	pkgDir := filepath.Join(tmp, "pkg", "foo")
-	os.MkdirAll(pkgDir, 0o755)
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	// The .bn file declares "pkg/wrong" but lives at pkg/foo
-	os.WriteFile(filepath.Join(pkgDir, "foo.bn"), []byte(`package "pkg/wrong"
+	if err := os.WriteFile(filepath.Join(pkgDir, "foo.bn"), []byte(`package "pkg/wrong"
 
 func f() {}
-`), 0o644)
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	l := New(tmp)
 	imports := []*ast.ImportSpec{
@@ -371,12 +375,16 @@ func TestPackageNameMismatch_BNIFile(t *testing.T) {
 
 	// Create a .bni file that declares the wrong package
 	pkgDir := filepath.Join(tmp, "pkg")
-	os.MkdirAll(pkgDir, 0o755)
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
-	os.WriteFile(filepath.Join(pkgDir, "foo.bni"), []byte(`package "pkg/wrong"
+	if err := os.WriteFile(filepath.Join(pkgDir, "foo.bni"), []byte(`package "pkg/wrong"
 
 func f(x int) int
-`), 0o644)
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	l := New(tmp)
 	imports := []*ast.ImportSpec{
@@ -426,9 +434,14 @@ func TestTopologicalOrder_Synthetic(t *testing.T) {
 	tmp := t.TempDir()
 
 	write := func(path, content string) {
+		t.Helper()
 		dir := filepath.Dir(filepath.Join(tmp, path))
-		os.MkdirAll(dir, 0o755)
-		os.WriteFile(filepath.Join(tmp, path), []byte(content), 0o644)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tmp, path), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	write("pkg/d/d.bn", `package "pkg/d"
@@ -533,12 +546,16 @@ func TestLoadBNIOnly(t *testing.T) {
 	tmp := t.TempDir()
 
 	pkgDir := filepath.Join(tmp, "pkg")
-	os.MkdirAll(pkgDir, 0o755)
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
-	os.WriteFile(filepath.Join(pkgDir, "math.bni"), []byte(`package "pkg/math"
+	if err := os.WriteFile(filepath.Join(pkgDir, "math.bni"), []byte(`package "pkg/math"
 
 func abs(x int) int
-`), 0o644)
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	l := New(tmp)
 	imports := []*ast.ImportSpec{

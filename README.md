@@ -1,5 +1,7 @@
 # Binate Bootstrap Interpreter
 
+[![CI](https://github.com/binate/bootstrap/actions/workflows/ci.yml/badge.svg)](https://github.com/binate/bootstrap/actions/workflows/ci.yml)
+
 A tree-walking interpreter for the Binate programming language, written in Go. This is the bootstrap toolchain — its purpose is to run the self-hosted Binate compiler/interpreter, which will then replace it.
 
 ## Usage
