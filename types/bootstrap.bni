@@ -21,22 +21,6 @@ func Itoa(v int) []char
 // String operations
 func Concat(a []char, b []char) @[]char
 
-// Raw memory access
-func Malloc(size int) *uint8
-func Free(ptr *uint8)
-func Memset(ptr *uint8, val int, size int)
-func Memcpy(dst *uint8, src *uint8, size int)
-func PeekI64(ptr *uint8, offset int) int
-func PokeI64(ptr *uint8, offset int, val int)
-func PeekI32(ptr *uint8, offset int) int
-func PokeI32(ptr *uint8, offset int, val int)
-func PeekI16(ptr *uint8, offset int) int
-func PokeI16(ptr *uint8, offset int, val int)
-func PeekI8(ptr *uint8, offset int) int
-func PokeI8(ptr *uint8, offset int, val int)
-func PeekPtr(ptr *uint8, offset int) *uint8
-func PokePtr(ptr *uint8, offset int, val *uint8)
-
 // File open flags
 const O_RDONLY int = 0
 const O_WRONLY int = 1

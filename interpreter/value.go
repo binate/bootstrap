@@ -4,7 +4,6 @@ package interpreter
 import (
 	"fmt"
 	"strings"
-	"unsafe"
 
 	"github.com/binate/bootstrap/ast"
 	"github.com/binate/bootstrap/types"
@@ -68,9 +67,8 @@ func (v *NilVal) String() string   { return "nil" }
 
 // PointerVal represents a raw pointer value.
 type PointerVal struct {
-	Addr    *HeapObject
-	RawAddr unsafe.Pointer // raw memory address (for Malloc'd blocks, Peek/Poke)
-	Typ     types.Type     // the pointer type (*T)
+	Addr *HeapObject
+	Typ  types.Type // the pointer type (*T)
 }
 
 func (v *PointerVal) Type() types.Type { return v.Typ }
@@ -83,9 +81,8 @@ func (v *PointerVal) String() string {
 
 // ManagedPtrVal represents a managed pointer value (@T).
 type ManagedPtrVal struct {
-	Addr    *HeapObject
-	RawAddr unsafe.Pointer // raw memory address (for flat memory interop)
-	Typ     types.Type     // the managed pointer type (@T)
+	Addr *HeapObject
+	Typ  types.Type // the managed pointer type (@T)
 }
 
 func (v *ManagedPtrVal) Type() types.Type { return v.Typ }

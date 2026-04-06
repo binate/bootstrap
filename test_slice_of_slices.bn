@@ -1,0 +1,26 @@
+package "main"
+
+func streq(a []char, b []char) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	var i int = 0
+	for i < len(a) {
+		if a[i] != b[i] {
+			return false
+		}
+		i = i + 1
+	}
+	return true
+}
+
+func main() {
+	var args [][]char
+	args = append(args, "hello")
+	args = append(args, "-g")
+	if streq(args[1], "-g") {
+		println(1)
+	} else {
+		println(0)
+	}
+}
