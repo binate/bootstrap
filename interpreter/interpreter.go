@@ -385,6 +385,9 @@ func (interp *Interpreter) registerBootstrapPackage() {
 		},
 	})
 
+	// Raw memory access builtins
+	interp.registerMemBuiltins(pkg)
+
 	// Constants — file open flags
 	pkg.define("O_RDONLY", &IntVal{Val: 0, Typ: types.Typ_int})
 	pkg.define("O_WRONLY", &IntVal{Val: 1, Typ: types.Typ_int})
