@@ -16,7 +16,7 @@ func Args() [][]char
 func Exec(program []char, args []@[]char) int
 
 // Conversions
-func Itoa(v int) []char
+func Itoa(v int) @[]char
 
 // String operations
 func Concat(a []char, b []char) @[]char
