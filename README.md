@@ -233,3 +233,7 @@ gofmt -w .
 # Lint
 go vet ./...
 ```
+
+## License
+
+[MIT](LICENSE)
