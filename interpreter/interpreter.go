@@ -343,7 +343,7 @@ func (interp *Interpreter) registerBootstrapPackage() {
 			return &IntVal{Val: 1, Typ: types.Typ_int}
 		},
 	})
-	// Args: Args() [][]char — returns program arguments (after -- separator)
+	// Args: Args() @[]@[]char — returns program arguments (after -- separator)
 	pkg.define("Args", &BuiltinFuncVal{
 		Name: "Args",
 		Fn: func(args []Value) Value {
