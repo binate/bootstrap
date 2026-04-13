@@ -303,12 +303,12 @@ func (interp *Interpreter) registerBootstrapPackage() {
 			return &IntVal{Val: 0, Typ: types.Typ_int}
 		},
 	})
-	// ReadDir: ReadDir(path []char) [][]char — returns sorted filenames in directory (nil on error)
-	pkg.define("ReadDir", &BuiltinFuncVal{
-		Name: "ReadDir",
+	// ReadDirDeprecated: ReadDirDeprecated(path []char) [][]char — DEPRECATED
+	pkg.define("ReadDirDeprecated", &BuiltinFuncVal{
+		Name: "ReadDirDeprecated",
 		Fn: func(args []Value) Value {
 			if len(args) < 1 {
-				panic("ReadDir requires 1 argument: path")
+				panic("ReadDirDeprecated requires 1 argument: path")
 			}
 			dir := stringToGo(args[0])
 			entries, err := os.ReadDir(dir)
