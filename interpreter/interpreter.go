@@ -325,6 +325,28 @@ func (interp *Interpreter) registerBootstrapPackage() {
 			}
 		},
 	})
+	// ReadDir: ReadDir(path []char) @[]@[]char — safe version returning managed slices
+	pkg.define("ReadDir", &BuiltinFuncVal{
+		Name: "ReadDir",
+		Fn: func(args []Value) Value {
+			if len(args) < 1 {
+				panic("ReadDir requires 1 argument: path")
+			}
+			dir := stringToGo(args[0])
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				return &NilVal{}
+			}
+			elems := make([]Value, 0, len(entries))
+			for _, e := range entries {
+				elems = append(elems, goToCharSlice(e.Name()))
+			}
+			return &SliceVal{
+				Elems: elems,
+				Typ:   &types.SliceType{Elem: types.Typ_string},
+			}
+		},
+	})
 	// Stat: Stat(path []char) int — returns 0=not found, 1=file, 2=directory
 	pkg.define("Stat", &BuiltinFuncVal{
 		Name: "Stat",

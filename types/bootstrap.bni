@@ -8,6 +8,7 @@ func Close(fd int) int
 
 // Directory
 func ReadDirDeprecated(path []char) [][]char
+func ReadDir(path []char) @[]@[]char
 func Stat(path []char) int
 
 // Process
