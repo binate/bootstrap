@@ -274,16 +274,16 @@ func (interp *Interpreter) registerBootstrapPackage() {
 			return &IntVal{Val: int64(nRead), Typ: types.Typ_int}
 		},
 	})
-	// Write: Write(fd int, data []uint8, n int) int — returns bytes written
+	// Write: Write(fd int, data []uint8) int — writes len(data) bytes
 	pkg.define("Write", &BuiltinFuncVal{
 		Name: "Write",
 		Fn: func(args []Value) Value {
-			if len(args) < 3 {
-				panic("Write requires 3 arguments: fd, data, n")
+			if len(args) < 2 {
+				panic("Write requires 2 arguments: fd, data")
 			}
 			fd := int(args[0].(*IntVal).Val)
 			data := args[1].(*SliceVal)
-			n := int(args[2].(*IntVal).Val)
+			n := len(data.Elems)
 			nWritten := interp.writeFile(fd, data, n)
 			return &IntVal{Val: int64(nWritten), Typ: types.Typ_int}
 		},
