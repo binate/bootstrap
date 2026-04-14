@@ -260,16 +260,16 @@ func (interp *Interpreter) registerBootstrapPackage() {
 			return &IntVal{Val: int64(fd), Typ: types.Typ_int}
 		},
 	})
-	// Read: Read(fd int, buf []uint8, n int) int — returns bytes read
+	// Read: Read(fd int, buf []uint8) int — returns bytes read (up to len(buf))
 	pkg.define("Read", &BuiltinFuncVal{
 		Name: "Read",
 		Fn: func(args []Value) Value {
-			if len(args) < 3 {
-				panic("Read requires 3 arguments: fd, buf, n")
+			if len(args) < 2 {
+				panic("Read requires 2 arguments: fd, buf")
 			}
 			fd := int(args[0].(*IntVal).Val)
 			buf := args[1].(*SliceVal)
-			n := int(args[2].(*IntVal).Val)
+			n := len(buf.Elems)
 			nRead := interp.readFile(fd, buf, n)
 			return &IntVal{Val: int64(nRead), Typ: types.Typ_int}
 		},

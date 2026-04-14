@@ -2,7 +2,7 @@ package "pkg/bootstrap"
 
 // File I/O
 func Open(path []char, flags int) int
-func Read(fd int, buf []uint8, n int) int
+func Read(fd int, buf []uint8) int
 func Write(fd int, buf []uint8, n int) int
 func Close(fd int) int
 
