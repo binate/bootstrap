@@ -757,6 +757,94 @@ func TestParseType_ManagedPtrToArray(t *testing.T) {
 	}
 }
 
+func TestParseType_RawSliceStarSugar(t *testing.T) {
+	// *[]T — new raw-slice sugar (Stage 1 of []T → *[]T migration).
+	// Same AST as []T: *ast.SliceType.
+	p := parse(t, "*[]int")
+	typ := p.ParseType()
+	noErrors(t, p)
+	sl, ok := typ.(*ast.SliceType)
+	if !ok {
+		t.Fatalf("expected *ast.SliceType, got %T", typ)
+	}
+	nt, ok := sl.Elem.(*ast.NamedType)
+	if !ok {
+		t.Fatalf("expected *ast.NamedType, got %T", sl.Elem)
+	}
+	if nt.Name.Name != "int" {
+		t.Errorf("expected int, got %s", nt.Name.Name)
+	}
+}
+
+func TestParseType_RawSliceStarSugarNested(t *testing.T) {
+	// *[]*[]char — raw slice of raw slice of char (nested sugar).
+	p := parse(t, "*[]*[]char")
+	typ := p.ParseType()
+	noErrors(t, p)
+	outer, ok := typ.(*ast.SliceType)
+	if !ok {
+		t.Fatalf("expected outer *ast.SliceType, got %T", typ)
+	}
+	inner, ok := outer.Elem.(*ast.SliceType)
+	if !ok {
+		t.Fatalf("expected inner *ast.SliceType, got %T", outer.Elem)
+	}
+	nt, ok := inner.Elem.(*ast.NamedType)
+	if !ok {
+		t.Fatalf("expected *ast.NamedType, got %T", inner.Elem)
+	}
+	if nt.Name.Name != "char" {
+		t.Errorf("expected char, got %s", nt.Name.Name)
+	}
+}
+
+func TestParseType_BareStarBracketArrayRejected(t *testing.T) {
+	// *[N]T — no longer valid; user must write *([N]T).
+	p := parse(t, "*[10]int")
+	_ = p.ParseType()
+	if len(p.Errors()) == 0 {
+		t.Fatalf("expected parse error for bare *[10]int, got none")
+	}
+}
+
+func TestParseType_PointerToArrayViaParens(t *testing.T) {
+	// *([N]T) — the required way to express pointer-to-array.
+	p := parse(t, "*([10]int)")
+	typ := p.ParseType()
+	noErrors(t, p)
+	pt, ok := typ.(*ast.PointerType)
+	if !ok {
+		t.Fatalf("expected *ast.PointerType, got %T", typ)
+	}
+	paren, ok := pt.Base.(*ast.ParenType)
+	if !ok {
+		t.Fatalf("expected *ast.ParenType, got %T", pt.Base)
+	}
+	at, ok := paren.Type.(*ast.ArrayType)
+	if !ok {
+		t.Fatalf("expected *ast.ArrayType inside parens, got %T", paren.Type)
+	}
+	assertIntLit(t, at.Len, "10")
+}
+
+func TestParseType_PointerToSliceViaParens(t *testing.T) {
+	// *([]T) — the required way to express pointer-to-raw-slice.
+	p := parse(t, "*([]int)")
+	typ := p.ParseType()
+	noErrors(t, p)
+	pt, ok := typ.(*ast.PointerType)
+	if !ok {
+		t.Fatalf("expected *ast.PointerType, got %T", typ)
+	}
+	paren, ok := pt.Base.(*ast.ParenType)
+	if !ok {
+		t.Fatalf("expected *ast.ParenType, got %T", pt.Base)
+	}
+	if _, ok := paren.Type.(*ast.SliceType); !ok {
+		t.Fatalf("expected *ast.SliceType inside parens, got %T", paren.Type)
+	}
+}
+
 func TestParseType_ParenGrouping(t *testing.T) {
 	// @([]T) — managed pointer to raw slice
 	p := parse(t, "@([]int)")

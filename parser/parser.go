@@ -105,9 +105,29 @@ func (p *Parser) ParseType() ast.TypeExpr {
 
 func (p *Parser) parseType() ast.TypeExpr {
 	switch p.tok.Type {
-	case token.STAR: // *T
+	case token.STAR: // *T or *[]T
 		pos := p.tok.Pos
 		p.next()
+		if p.tok.Type == token.LBRACKET {
+			lbrack := p.tok.Pos
+			p.next() // consume [
+			if p.tok.Type == token.RBRACKET {
+				// *[]T — raw slice sugar (Stage 1 of raw-slice
+				// syntax migration; same AST as []T).
+				p.next() // consume ]
+				elem := p.parseType()
+				return &ast.SliceType{Lbrack: lbrack, Elem: elem}
+			}
+			// Bare "*[<expr>" is no longer valid — force parens for
+			// pointer-to-array (*([N]T)) and pointer-to-slice (*([]T)).
+			p.errorf(`bare "*[" is raw-slice sugar (*[]T); use "*([N]T)" for pointer to array or "*([]T)" for pointer to slice`)
+			// Recover: parse as if it were *[N]T (pointer to array).
+			length := p.parseExpr()
+			p.expect(token.RBRACKET)
+			elem := p.parseType()
+			arr := &ast.ArrayType{Lbrack: lbrack, Len: length, Elem: elem}
+			return &ast.PointerType{Star: pos, Base: arr}
+		}
 		base := p.parseType()
 		return &ast.PointerType{Star: pos, Base: base}
 
