@@ -664,20 +664,12 @@ func TestParseType_ManagedSlice(t *testing.T) {
 	}
 }
 
-func TestParseType_Slice(t *testing.T) {
+func TestParseType_BareSliceRejected(t *testing.T) {
+	// Bare "[]T" is no longer valid — raw slices must use "*[]T".
 	p := parse(t, "[]byte")
-	typ := p.ParseType()
-	noErrors(t, p)
-	sl, ok := typ.(*ast.SliceType)
-	if !ok {
-		t.Fatalf("expected *ast.SliceType, got %T", typ)
-	}
-	nt, ok := sl.Elem.(*ast.NamedType)
-	if !ok {
-		t.Fatalf("expected *ast.NamedType, got %T", sl.Elem)
-	}
-	if nt.Name.Name != "byte" {
-		t.Errorf("expected byte, got %s", nt.Name.Name)
+	_ = p.ParseType()
+	if len(p.Errors()) == 0 {
+		t.Fatalf("expected parse error for bare []byte, got none")
 	}
 }
 
@@ -828,8 +820,8 @@ func TestParseType_PointerToArrayViaParens(t *testing.T) {
 }
 
 func TestParseType_PointerToSliceViaParens(t *testing.T) {
-	// *([]T) — the required way to express pointer-to-raw-slice.
-	p := parse(t, "*([]int)")
+	// *(*[]T) — the required way to express pointer-to-raw-slice.
+	p := parse(t, "*(*[]int)")
 	typ := p.ParseType()
 	noErrors(t, p)
 	pt, ok := typ.(*ast.PointerType)
@@ -846,8 +838,8 @@ func TestParseType_PointerToSliceViaParens(t *testing.T) {
 }
 
 func TestParseType_ParenGrouping(t *testing.T) {
-	// @([]T) — managed pointer to raw slice
-	p := parse(t, "@([]int)")
+	// @(*[]T) — managed pointer to raw slice
+	p := parse(t, "@(*[]int)")
 	typ := p.ParseType()
 	noErrors(t, p)
 	mp, ok := typ.(*ast.ManagedPtrType)

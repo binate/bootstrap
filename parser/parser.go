@@ -154,11 +154,12 @@ func (p *Parser) parseType() ast.TypeExpr {
 		base := p.parseType()
 		return &ast.ManagedPtrType{At: pos, Base: base}
 
-	case token.LBRACKET: // []T or [N]T
+	case token.LBRACKET: // [N]T (array); bare []T is no longer valid
 		pos := p.tok.Pos
 		p.next() // consume [
 		if p.tok.Type == token.RBRACKET {
-			// []T — slice type
+			// Bare []T is no longer a valid raw-slice syntax — use *[]T.
+			p.errorf(`bare "[" "]" is no longer valid raw-slice syntax; use "*[]T" instead`)
 			p.next() // consume ]
 			elem := p.parseType()
 			return &ast.SliceType{Lbrack: pos, Elem: elem}

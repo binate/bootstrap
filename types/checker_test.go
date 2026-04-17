@@ -233,7 +233,7 @@ func TestCheckSlice(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	var s []int
+	var s *[]int
 	var x int = len(s)
 	x = x
 }
@@ -522,7 +522,7 @@ func TestCheckStringCharSliceAssignable(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	var s []char = "hello"
+	var s *[]char = "hello"
 	println(s)
 }
 `
@@ -533,7 +533,7 @@ func main() {
 func TestCheckCharSliceReturnString(t *testing.T) {
 	src := `package "main"
 
-func greet() []char {
+func greet() *[]char {
 	return "hello"
 }
 
@@ -549,8 +549,8 @@ func TestCheckStringConcatPlus(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	var a []char = "hello"
-	var b []char = " world"
+	var a *[]char = "hello"
+	var b *[]char = " world"
 	println(a + b)
 }
 `
@@ -596,7 +596,7 @@ type Parent struct {
 }
 
 type Child struct {
-	name []char
+	name *[]char
 }
 
 func main() {
@@ -693,7 +693,7 @@ func TestCheckSliceNilCompareRejected(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	var s []int
+	var s *[]int
 	if s == nil {
 	}
 }
@@ -706,7 +706,7 @@ func TestCheckSliceNilAssignRejected(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	var s []int = nil
+	var s *[]int = nil
 }
 `
 	c := checkFile(t, src)

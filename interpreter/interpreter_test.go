@@ -1321,7 +1321,7 @@ func TestStringLenCharSlice(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	var s []char = "hello"
+	var s *[]char = "hello"
 	println(len(s))
 	println(len("abc"))
 }
@@ -1335,7 +1335,7 @@ func main() {
 func TestStringCharSliceAssignable(t *testing.T) {
 	src := `package "main"
 
-func greet(name []char) {
+func greet(name *[]char) {
 	println(name)
 }
 
@@ -1355,8 +1355,8 @@ func TestBootstrapConcat(t *testing.T) {
 import "pkg/bootstrap"
 
 func main() {
-	var a []char = "foo"
-	var b []char = "bar"
+	var a *[]char = "foo"
+	var b *[]char = "bar"
 	println(bootstrap.Concat(a, b))
 	println(bootstrap.Concat("hello", " world"))
 }
@@ -1394,7 +1394,7 @@ import "pkg/bootstrap"
 
 func main() {
 	var x int = 42
-	var s []char = bootstrap.Itoa(x)
+	var s *[]char = bootstrap.Itoa(x)
 	println(s)
 }
 `
@@ -1433,7 +1433,7 @@ func TestLenNilSlice(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	var s []int
+	var s *[]int
 	println(len(s))
 }
 `
@@ -1447,8 +1447,8 @@ func TestStringSlicing(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	var s []char = "hello"
-	var t []char = s[1:4]
+	var s *[]char = "hello"
+	var t *[]char = s[1:4]
 	println(t)
 	println(len(t))
 }
@@ -1464,8 +1464,8 @@ func TestStringSliceToEnd(t *testing.T) {
 	src := `package "main"
 
 func main() {
-	var s []char = "hello"
-	var t []char = s[3:]
+	var s *[]char = "hello"
+	var t *[]char = s[3:]
 	println(t)
 }
 `
@@ -1486,7 +1486,7 @@ const (
 	BLUE
 )
 
-func name(c Color) []char {
+func name(c Color) *[]char {
 	switch c {
 	case RED:
 		return "red"
