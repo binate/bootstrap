@@ -91,12 +91,12 @@ func (t *ManagedPtrType) String() string   { return "@" + t.Elem.String() }
 func (t *ManagedPtrType) Underlying() Type { return t }
 func (t *ManagedPtrType) typeNode()        {}
 
-// SliceType represents a raw slice []T.
+// SliceType represents a raw slice *[]T.
 type SliceType struct {
 	Elem Type
 }
 
-func (t *SliceType) String() string   { return "[]" + t.Elem.String() }
+func (t *SliceType) String() string   { return "*[]" + t.Elem.String() }
 func (t *SliceType) Underlying() Type { return t }
 func (t *SliceType) typeNode()        {}
 
