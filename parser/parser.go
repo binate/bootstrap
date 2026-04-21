@@ -177,6 +177,10 @@ func (p *Parser) parseType() ast.TypeExpr {
 		p.expect(token.RPAREN)
 		return &ast.ParenType{Lparen: pos, Type: typ}
 
+	case token.CONST: // const T — bootstrap is permissive, strip it
+		p.next()
+		return p.parseType()
+
 	case token.STRUCT: // struct { ... }
 		return p.parseStructType()
 
