@@ -62,9 +62,11 @@ func (s *ImportSpec) node()          {}
 // Declarations
 // ============================================================
 
-// FuncDecl represents a function declaration.
+// FuncDecl represents a function or method declaration.
+// Recv is non-nil for method declarations (`func (r RT) Name(...)`).
 type FuncDecl struct {
 	FuncPos token.Pos
+	Recv    *ParamDecl // nil for free functions; non-nil for methods
 	Name    *Ident
 	Params  []*ParamDecl
 	Results []TypeExpr // nil or empty for no return; one or more for return types

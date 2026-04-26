@@ -1352,6 +1352,95 @@ import (
 	}
 }
 
+func TestParseMethodDecl(t *testing.T) {
+	input := `package "main"
+
+func (p *Point) Translate(dx int, dy int) {
+	return
+}
+
+func (p Point) X() int {
+	return 0
+}
+
+func (p @Node) Next() @Node {
+	return nil
+}
+`
+	p := parse(t, input)
+	f := p.ParseFile()
+	noErrors(t, p)
+
+	if len(f.Decls) != 3 {
+		t.Fatalf("expected 3 decls, got %d", len(f.Decls))
+	}
+
+	cases := []struct {
+		name      string
+		recvName  string
+		recvKind  string // "ptr", "value", "managed"
+		recvBase  string
+		paramN    int
+		resultN   int
+	}{
+		{"Translate", "p", "ptr", "Point", 2, 0},
+		{"X", "p", "value", "Point", 0, 1},
+		{"Next", "p", "managed", "Node", 0, 1},
+	}
+	for i, c := range cases {
+		fd, ok := f.Decls[i].(*ast.FuncDecl)
+		if !ok {
+			t.Fatalf("decl %d: expected FuncDecl, got %T", i, f.Decls[i])
+		}
+		if fd.Recv == nil {
+			t.Fatalf("decl %d (%s): expected receiver, got nil", i, c.name)
+		}
+		if fd.Name == nil || fd.Name.Name != c.name {
+			gotName := "<nil>"
+			if fd.Name != nil {
+				gotName = fd.Name.Name
+			}
+			t.Errorf("decl %d: expected name %q, got %q", i, c.name, gotName)
+		}
+		if fd.Recv.Name == nil || fd.Recv.Name.Name != c.recvName {
+			t.Errorf("decl %d (%s): expected recv name %q", i, c.name, c.recvName)
+		}
+		switch c.recvKind {
+		case "ptr":
+			pt, ok := fd.Recv.Type.(*ast.PointerType)
+			if !ok {
+				t.Errorf("decl %d (%s): expected *T receiver, got %T", i, c.name, fd.Recv.Type)
+				continue
+			}
+			named, ok := pt.Base.(*ast.NamedType)
+			if !ok || named.Name.Name != c.recvBase {
+				t.Errorf("decl %d (%s): expected *%s, got %T", i, c.name, c.recvBase, pt.Base)
+			}
+		case "value":
+			named, ok := fd.Recv.Type.(*ast.NamedType)
+			if !ok || named.Name.Name != c.recvBase {
+				t.Errorf("decl %d (%s): expected %s value receiver, got %T", i, c.name, c.recvBase, fd.Recv.Type)
+			}
+		case "managed":
+			mt, ok := fd.Recv.Type.(*ast.ManagedPtrType)
+			if !ok {
+				t.Errorf("decl %d (%s): expected @T receiver, got %T", i, c.name, fd.Recv.Type)
+				continue
+			}
+			named, ok := mt.Base.(*ast.NamedType)
+			if !ok || named.Name.Name != c.recvBase {
+				t.Errorf("decl %d (%s): expected @%s, got %T", i, c.name, c.recvBase, mt.Base)
+			}
+		}
+		if len(fd.Params) != c.paramN {
+			t.Errorf("decl %d (%s): expected %d params, got %d", i, c.name, c.paramN, len(fd.Params))
+		}
+		if len(fd.Results) != c.resultN {
+			t.Errorf("decl %d (%s): expected %d results, got %d", i, c.name, c.resultN, len(fd.Results))
+		}
+	}
+}
+
 func TestParseFuncMultipleReturns(t *testing.T) {
 	input := `package "main"
 

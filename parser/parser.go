@@ -851,6 +851,16 @@ func (p *Parser) parseTopLevelDecl() ast.Decl {
 func (p *Parser) parseFuncDecl() *ast.FuncDecl {
 	pos := p.tok.Pos
 	p.expect(token.FUNC)
+
+	// Optional receiver: `func (r RT) Name(...)`. After `func`, an
+	// LPAREN means a method receiver; an IDENT means a free function.
+	var recv *ast.ParamDecl
+	if p.tok.Type == token.LPAREN {
+		p.next()
+		recv = p.parseParamDecl()
+		p.expect(token.RPAREN)
+	}
+
 	name := p.parseIdent()
 
 	// Parameters
@@ -881,6 +891,7 @@ func (p *Parser) parseFuncDecl() *ast.FuncDecl {
 	}
 	return &ast.FuncDecl{
 		FuncPos: pos,
+		Recv:    recv,
 		Name:    name,
 		Params:  params,
 		Results: results,
