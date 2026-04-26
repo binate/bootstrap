@@ -14,7 +14,14 @@ type Parser struct {
 	lex  *lexer.Lexer
 	tok  token.Token // current token
 	prev token.Token // previous token (for error reporting)
-	errs []Error
+	// peek holds a one-token lookahead. peekTok() pulls a token from
+	// the lexer and stashes it here; the next next() call drains it
+	// before pulling fresh. Used by parsePrimaryExpr to merge adjacent
+	// string literals across an ASI-inserted semicolon without
+	// committing to consume the SEMI before knowing what follows.
+	peek    token.Token
+	hasPeek bool
+	errs    []Error
 
 	// noCompositeLit suppresses composite literal parsing (D4).
 	// Set when parsing conditions in if/for/switch where { would be
@@ -61,10 +68,39 @@ func (p *Parser) Errors() []Error {
 	return p.errs
 }
 
-// next advances to the next token.
+// mergeAdjacentStringLits returns the C-style concatenation of two raw
+// string literals (each in `"..."` form). Drops the trailing `"` of `a`
+// and the leading `"` of `b` so the result is one quoted literal with
+// the contents glued together. Escape sequences inside each input pass
+// through verbatim.
+func mergeAdjacentStringLits(a, b string) string {
+	if len(a) < 1 || len(b) < 1 {
+		return a + b
+	}
+	return a[:len(a)-1] + b[1:]
+}
+
+// next advances to the next token. If peekTok() has stashed a
+// lookahead token, drain that first.
 func (p *Parser) next() {
 	p.prev = p.tok
-	p.tok = p.lex.Next()
+	if p.hasPeek {
+		p.tok = p.peek
+		p.hasPeek = false
+	} else {
+		p.tok = p.lex.Next()
+	}
+}
+
+// peekTok returns the token after the current one without consuming
+// the current. Subsequent calls return the same stashed token until
+// a next() drains it.
+func (p *Parser) peekTok() token.Token {
+	if !p.hasPeek {
+		p.peek = p.lex.Next()
+		p.hasPeek = true
+	}
+	return p.peek
 }
 
 // expect consumes the current token if it matches typ, otherwise records an error.
@@ -476,7 +512,38 @@ func (p *Parser) parsePrimaryExpr() ast.Expr {
 	case token.STRING:
 		tok := p.tok
 		p.next()
-		return &ast.StringLit{ValuePos: tok.Pos, Value: tok.Literal}
+		lit := tok.Literal
+		// C-style adjacent string-literal concatenation in expression
+		// context. Two shapes accepted:
+		//   "foo" "bar"           — same line, lexer emits STRING STRING
+		//   "foo"\n"bar"          — different lines, ASI inserts a SEMI
+		// For the latter, peek past the SEMI to check if a STRING
+		// follows; if so, consume the SEMI (it's spurious in expression
+		// context) and merge. Otherwise leave the SEMI alone — it ends
+		// the enclosing statement.
+		// Done here (not in the lexer) because grouped imports also
+		// have STRING SEMI("\n") STRING and ASI is the path separator
+		// — a lexer-level merge would silently glue separate paths.
+		for {
+			if p.tok.Type == token.STRING {
+				lit = mergeAdjacentStringLits(lit, p.tok.Literal)
+				p.next()
+				continue
+			}
+			if p.tok.Type == token.SEMICOLON &&
+				len(p.tok.Literal) > 0 && p.tok.Literal[0] == '\n' {
+				pk := p.peekTok()
+				if pk.Type != token.STRING {
+					break
+				}
+				p.next() // consume the ASI SEMI
+				lit = mergeAdjacentStringLits(lit, p.tok.Literal)
+				p.next()
+				continue
+			}
+			break
+		}
+		return &ast.StringLit{ValuePos: tok.Pos, Value: lit}
 	case token.CHAR:
 		tok := p.tok
 		p.next()
