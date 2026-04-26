@@ -1084,6 +1084,13 @@ func (p *Parser) parseStmt() ast.Stmt {
 	case token.CONST:
 		return p.parseConstDecl().(*ast.ConstDecl)
 	case token.TYPE:
+		// Function-local `type` declarations are rejected — `type`
+		// is a top-level-only declaration. See claude-notes.md
+		// § Scoping rules and differences-with-go.md.
+		p.errorf("type declarations must be at package level, " +
+			"not inside a function body")
+		// Recover by parsing it anyway and dropping the result, so
+		// downstream parsing isn't derailed by leftover tokens.
 		return p.parseTypeDecl().(*ast.TypeDecl)
 	default:
 		return p.parseSimpleStmt()
