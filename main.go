@@ -285,6 +285,9 @@ func runDirTests(root string, addRoots []string, dir string, verbose bool) {
 		if !strings.HasPrefix(fd.Name.Name, "Test") || fd.Body == nil {
 			continue
 		}
+		if fd.Recv != nil {
+			continue // methods can't be top-level test functions
+		}
 		if len(fd.Params) == 0 && isTestResultReturn(fd) {
 			testNames = append(testNames, fd.Name.Name)
 		} else {

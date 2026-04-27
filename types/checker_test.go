@@ -800,3 +800,203 @@ func main() {
 	c := checkFile(t, src)
 	expectNoErrors(t, c)
 }
+
+// ============================================================
+// Method declarations (Stage 2 of plan-receivers.md)
+// ============================================================
+
+func TestCheckMethodPointerRecv(t *testing.T) {
+	src := `package "main"
+
+type Point struct {
+	x int
+	y int
+}
+
+func (p *Point) X() int {
+	return p.x
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+func TestCheckMethodValueRecv(t *testing.T) {
+	src := `package "main"
+
+type Counter struct { n int }
+
+func (c Counter) Get() int {
+	return c.n
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+func TestCheckMethodManagedRecv(t *testing.T) {
+	src := `package "main"
+
+type Node struct { val int }
+
+func (n @Node) Val() int {
+	return n.val
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+func TestCheckMethodOnNamedPrimitive(t *testing.T) {
+	src := `package "main"
+
+type Celsius int
+
+func (c Celsius) Zero() bool {
+	return false
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+func TestCheckMethodOnAliasIsError(t *testing.T) {
+	src := `package "main"
+
+type MyInt = int
+
+func (m MyInt) Get() int {
+	return 0
+}
+`
+	c := checkFile(t, src)
+	expectError(t, c, "method receiver")
+}
+
+func TestCheckMethodOnBuiltinIsError(t *testing.T) {
+	src := `package "main"
+
+func (i int) Foo() int {
+	return 0
+}
+`
+	c := checkFile(t, src)
+	expectError(t, c, "method receiver")
+}
+
+func TestCheckMethodDuplicateIsError(t *testing.T) {
+	src := `package "main"
+
+type Point struct { x int }
+
+func (p *Point) X() int {
+	return p.x
+}
+
+func (p *Point) X() int {
+	return 0
+}
+`
+	c := checkFile(t, src)
+	expectError(t, c, "redeclared")
+}
+
+func TestCheckMethodAndFreeFunctionSameNameOK(t *testing.T) {
+	// Methods and free functions live in different namespaces — having a
+	// free function `Foo` and a method `Foo` on some type is allowed.
+	src := `package "main"
+
+type Point struct { x int }
+
+func (p *Point) Foo() int {
+	return p.x
+}
+
+func Foo() int {
+	return 42
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+func TestCheckMethodSameNameDifferentTypesOK(t *testing.T) {
+	// Two different named types can each have a method with the same name.
+	src := `package "main"
+
+type A struct { x int }
+type B struct { y int }
+
+func (a *A) Get() int {
+	return a.x
+}
+
+func (b *B) Get() int {
+	return b.y
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+func TestCheckMethodRegisteredOnNamedType(t *testing.T) {
+	// Use CheckPackage so we can probe the registered package scope after
+	// checking, and confirm the method landed on the NamedType (not in
+	// the package symbol table).
+	src := `package "main"
+
+type Point struct {
+	x int
+	y int
+}
+
+func (p *Point) X() int {
+	return p.x
+}
+`
+	p := parser.New([]byte(src), "test.bn")
+	f := p.ParseFile()
+	c := NewChecker()
+	c.CheckPackage("main", f)
+	expectNoErrors(t, c)
+
+	pkgScope := c.packages["main"]
+	if pkgScope == nil {
+		t.Fatalf("package scope not registered")
+	}
+	if pkgScope.lookupLocal("X") != nil {
+		t.Errorf("method X should not be in package scope")
+	}
+	sym := pkgScope.lookupLocal("Point")
+	if sym == nil {
+		t.Fatalf("Point not found in package scope")
+	}
+	nt, ok := sym.Type.(*NamedType)
+	if !ok {
+		t.Fatalf("Point not a NamedType (got %T)", sym.Type)
+	}
+	m := nt.LookupMethod("X")
+	if m == nil {
+		t.Fatalf("method X not registered on Point")
+	}
+	if len(m.Func.Params) != 1 {
+		t.Errorf("expected 1 param (the receiver), got %d", len(m.Func.Params))
+	}
+	if m.Func.Params[0].Name != "p" {
+		t.Errorf("receiver name should be 'p', got %q", m.Func.Params[0].Name)
+	}
+}
+
+func TestCheckMethodBodySeesReceiver(t *testing.T) {
+	// The receiver name must be in scope inside the body.
+	src := `package "main"
+
+type Point struct { x int; y int }
+
+func (p *Point) Sum() int {
+	return p.x + p.y
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}

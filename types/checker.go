@@ -79,6 +79,14 @@ func (s *Scope) lookup(name string) *Symbol {
 	return nil
 }
 
+// lookupLocal searches for a symbol in this scope only (not parents).
+func (s *Scope) lookupLocal(name string) *Symbol {
+	if sym, ok := s.symbols[name]; ok {
+		return sym
+	}
+	return nil
+}
+
 // NewChecker creates a new type checker.
 func NewChecker() *Checker {
 	c := &Checker{
@@ -401,6 +409,10 @@ func (c *Checker) collectDecls(decls []ast.Decl) {
 	for _, d := range decls {
 		switch d := d.(type) {
 		case *ast.FuncDecl:
+			if d.Recv != nil {
+				c.collectMethodDecl(d)
+				continue
+			}
 			ft := c.resolveFuncType(d)
 			if declaredFuncs[d.Name.Name] {
 				c.errorf(d.Name.Pos(), "%s redeclared in this block", d.Name.Name)
@@ -598,18 +610,28 @@ func (c *Checker) resolveFuncType(d *ast.FuncDecl) *FuncType {
 // ============================================================
 
 func (c *Checker) checkFuncDecl(d *ast.FuncDecl) {
-	sym := c.scope.lookup(d.Name.Name)
-	if sym == nil {
-		return // already errored
-	}
-	ft, ok := sym.Type.(*FuncType)
-	if !ok {
-		return
+	var ft *FuncType
+	if d.Recv != nil {
+		ft = c.lookupMethodFuncType(d)
+		if ft == nil {
+			return // collectMethodDecl already errored
+		}
+	} else {
+		sym := c.scope.lookup(d.Name.Name)
+		if sym == nil {
+			return // already errored
+		}
+		var ok bool
+		ft, ok = sym.Type.(*FuncType)
+		if !ok {
+			return
+		}
 	}
 
 	c.pushScope()
 
-	// Define parameters
+	// Define parameters (for methods, ft.Params[0] is the receiver, so
+	// it gets bound under the receiver name, accessible inside the body).
 	for _, p := range ft.Params {
 		c.scope.define(&Symbol{Name: p.Name, Type: p.Type, Kind: VarSym})
 	}
@@ -622,6 +644,109 @@ func (c *Checker) checkFuncDecl(d *ast.FuncDecl) {
 
 	c.funcRet = oldRet
 	c.popScope()
+}
+
+// collectMethodDecl resolves a method declaration's receiver, validates
+// it, and registers the method on its base named type.
+func (c *Checker) collectMethodDecl(d *ast.FuncDecl) {
+	named := c.resolveMethodReceiver(d)
+	if named == nil {
+		return
+	}
+	recvType := c.resolveTypeExpr(d.Recv.Type)
+	ft := c.resolveFuncType(d)
+	// Build a new FuncType with the receiver as Params[0].
+	combined := make([]*Param, 0, len(ft.Params)+1)
+	combined = append(combined, &Param{Name: d.Recv.Name.Name, Type: recvType})
+	combined = append(combined, ft.Params...)
+	methodFT := &FuncType{Params: combined, Results: ft.Results}
+
+	m := &Method{
+		Name:     d.Name.Name,
+		RecvType: recvType,
+		Func:     methodFT,
+	}
+	if !named.AddMethod(m) {
+		c.errorf(d.Name.Pos(), "method %s redeclared on type %s", d.Name.Name, named.Name)
+	}
+}
+
+// resolveMethodReceiver validates the receiver type and returns the base
+// named type. The receiver must be (a wrapper around) a named type
+// defined in the current package — wrappers may include `*`, `@`, `const`,
+// and parens. Returns nil and reports an error otherwise.
+func (c *Checker) resolveMethodReceiver(d *ast.FuncDecl) *NamedType {
+	// Walk the receiver TypeExpr to find the base name.
+	base := d.Recv.Type
+	for base != nil {
+		switch b := base.(type) {
+		case *ast.PointerType:
+			base = b.Base
+		case *ast.ManagedPtrType:
+			base = b.Base
+		case *ast.ParenType:
+			base = b.Type
+		default:
+			goto resolved
+		}
+	}
+resolved:
+	named, ok := base.(*ast.NamedType)
+	if !ok {
+		c.errorf(d.Recv.Name.Pos(), "method receiver must be a named type defined in this package")
+		return nil
+	}
+	if named.Pkg != nil {
+		c.errorf(d.Recv.Name.Pos(), "cannot define methods on types from other packages")
+		return nil
+	}
+	sym := c.scope.lookupLocal(named.Name.Name)
+	if sym == nil || sym.Kind != TypeSym {
+		c.errorf(d.Recv.Name.Pos(), "method receiver %s is not a type defined in this package", named.Name.Name)
+		return nil
+	}
+	nt, ok := sym.Type.(*NamedType)
+	if !ok {
+		c.errorf(d.Recv.Name.Pos(), "method receiver must be a named type (not an alias or builtin)")
+		return nil
+	}
+	return nt
+}
+
+// lookupMethodFuncType retrieves the FuncType registered by
+// collectMethodDecl for use in pass 2.
+func (c *Checker) lookupMethodFuncType(d *ast.FuncDecl) *FuncType {
+	base := d.Recv.Type
+	for base != nil {
+		switch b := base.(type) {
+		case *ast.PointerType:
+			base = b.Base
+		case *ast.ManagedPtrType:
+			base = b.Base
+		case *ast.ParenType:
+			base = b.Type
+		default:
+			goto resolved2
+		}
+	}
+resolved2:
+	named, ok := base.(*ast.NamedType)
+	if !ok || named.Pkg != nil {
+		return nil
+	}
+	sym := c.scope.lookupLocal(named.Name.Name)
+	if sym == nil {
+		return nil
+	}
+	nt, ok := sym.Type.(*NamedType)
+	if !ok {
+		return nil
+	}
+	m := nt.LookupMethod(d.Name.Name)
+	if m == nil {
+		return nil
+	}
+	return m.Func
 }
 
 func (c *Checker) checkVarDecl(d *ast.VarDecl) {

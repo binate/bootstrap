@@ -194,6 +194,40 @@ func (t *FuncType) typeNode()        {}
 type NamedType struct {
 	Name        string
 	Underlying_ Type // the underlying type
+
+	// Methods registered on this named type (declaration order).
+	Methods []*Method
+}
+
+// Method describes a method registered on a named type. RecvType is the
+// full receiver type as written (T, *T, @T, *const T, etc.); Func is the
+// function signature with the receiver included as Params[0].
+type Method struct {
+	Name     string
+	RecvType Type
+	Func     *FuncType
+}
+
+// LookupMethod returns the method named `name` on this named type, or
+// nil if no such method is registered.
+func (t *NamedType) LookupMethod(name string) *Method {
+	for _, m := range t.Methods {
+		if m.Name == name {
+			return m
+		}
+	}
+	return nil
+}
+
+// AddMethod appends m to the named type's method set. Returns false
+// (without modifying t) if a method with the same name is already
+// present.
+func (t *NamedType) AddMethod(m *Method) bool {
+	if t.LookupMethod(m.Name) != nil {
+		return false
+	}
+	t.Methods = append(t.Methods, m)
+	return true
 }
 
 func (t *NamedType) String() string   { return t.Name }

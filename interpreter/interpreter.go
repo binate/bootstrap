@@ -561,6 +561,12 @@ func valueToTestResult(v Value) string {
 func (interp *Interpreter) execTopLevelDecl(d ast.Decl) {
 	switch d := d.(type) {
 	case *ast.FuncDecl:
+		// Methods (Recv != nil) don't go in the package symbol table.
+		// Stage 6 of plan-receivers.md will register them on their base
+		// type and add `obj.M(...)` dispatch.
+		if d.Recv != nil {
+			return
+		}
 		interp.funcs[d.Name.Name] = d
 		ft := interp.resolveFuncType(d)
 		interp.env.define(d.Name.Name, &FuncVal{
