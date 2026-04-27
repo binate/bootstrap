@@ -1511,3 +1511,109 @@ func main() {
 		t.Errorf("expected %q, got %q", expect, got)
 	}
 }
+
+// ============================================================
+// Methods (Stage 6 of plan-receivers.md)
+// ============================================================
+
+func TestMethodPointerReceiver(t *testing.T) {
+	src := `package "main"
+
+type Point struct { x int; y int }
+
+func (p *Point) Sum() int {
+	return p.x + p.y
+}
+
+func main() {
+	var p Point
+	p.x = 3
+	p.y = 4
+	var pp *Point = &p
+	println(pp.Sum())
+}
+`
+	got := runProgram(t, src)
+	if got != "7\n" {
+		t.Errorf("expected %q, got %q", "7\n", got)
+	}
+}
+
+func TestMethodValueReceiver(t *testing.T) {
+	src := `package "main"
+
+type Counter struct { n int }
+
+func (c Counter) Get() int {
+	return c.n
+}
+
+func main() {
+	var c Counter
+	c.n = 42
+	println(c.Get())
+}
+`
+	got := runProgram(t, src)
+	if got != "42\n" {
+		t.Errorf("expected %q, got %q", "42\n", got)
+	}
+}
+
+func TestMethodWithArgs(t *testing.T) {
+	src := `package "main"
+
+type Point struct { x int }
+
+func (p *Point) Scaled(factor int) int {
+	return p.x * factor
+}
+
+func main() {
+	var p Point
+	p.x = 5
+	var pp *Point = &p
+	println(pp.Scaled(3))
+	println(pp.Scaled(10))
+}
+`
+	got := runProgram(t, src)
+	expect := "15\n50\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}
+
+func TestMethodSameNameDifferentTypes(t *testing.T) {
+	src := `package "main"
+
+type A struct { v int }
+type B struct { v int }
+
+func (a *A) Get() int {
+	return a.v + 100
+}
+
+func (b *B) Get() int {
+	return b.v + 200
+}
+
+func main() {
+	var a A
+	a.v = 1
+	var pa *A = &a
+
+	var b B
+	b.v = 2
+	var pb *B = &b
+
+	println(pa.Get())
+	println(pb.Get())
+}
+`
+	got := runProgram(t, src)
+	expect := "101\n202\n"
+	if got != expect {
+		t.Errorf("expected %q, got %q", expect, got)
+	}
+}

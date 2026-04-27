@@ -34,6 +34,9 @@ type Interpreter struct {
 	env           *Env
 	funcs         map[string]*ast.FuncDecl
 	types         map[string]types.Type
+	// methods[typeName][methodName] is the FuncDecl for that method.
+	// Built during top-level-decl processing (Stage 6 of plan-receivers.md).
+	methods       map[string]map[string]*ast.FuncDecl
 	stdout        *strings.Builder                 // captured output (nil = write to os.Stdout)
 	files         map[int]*os.File                 // open file descriptors
 	nextFD        int                              // next file descriptor to allocate
@@ -107,6 +110,7 @@ func New() *Interpreter {
 	interp := &Interpreter{
 		funcs:         make(map[string]*ast.FuncDecl),
 		types:         make(map[string]types.Type),
+		methods:       make(map[string]map[string]*ast.FuncDecl),
 		files:         map[int]*os.File{0: os.Stdin, 1: os.Stdout, 2: os.Stderr},
 		nextFD:        3,
 		packages:      make(map[string]*Env),
@@ -450,11 +454,13 @@ func (interp *Interpreter) LoadPackage(path string, file *ast.File, checker *typ
 	savedEnv := interp.env
 	savedFuncs := interp.funcs
 	savedTypes := interp.types
+	savedMethods := interp.methods
 	savedAliases := interp.importAliases
 
 	// Set up fresh state for this package
 	interp.funcs = make(map[string]*ast.FuncDecl)
 	interp.types = make(map[string]types.Type)
+	interp.methods = make(map[string]map[string]*ast.FuncDecl)
 	interp.importAliases = make(map[string]string)
 	interp.env = newEnv(nil)
 	interp.registerBuiltins() // builtins available in all packages
@@ -490,6 +496,7 @@ func (interp *Interpreter) LoadPackage(path string, file *ast.File, checker *typ
 	interp.env = savedEnv
 	interp.funcs = savedFuncs
 	interp.types = savedTypes
+	interp.methods = savedMethods
 	interp.importAliases = savedAliases
 }
 
@@ -561,10 +568,10 @@ func valueToTestResult(v Value) string {
 func (interp *Interpreter) execTopLevelDecl(d ast.Decl) {
 	switch d := d.(type) {
 	case *ast.FuncDecl:
-		// Methods (Recv != nil) don't go in the package symbol table.
-		// Stage 6 of plan-receivers.md will register them on their base
-		// type and add `obj.M(...)` dispatch.
+		// Methods (Recv != nil) live in a per-type method registry,
+		// not the package symbol table. (Stage 6 of plan-receivers.md.)
 		if d.Recv != nil {
+			interp.registerMethod(d)
 			return
 		}
 		interp.funcs[d.Name.Name] = d
@@ -1342,6 +1349,23 @@ func (interp *Interpreter) evalUnary(e *ast.UnaryExpr) Value {
 }
 
 func (interp *Interpreter) evalCall(e *ast.CallExpr) Value {
+	// Method-call dispatch: obj.M(args) where M is registered as a
+	// method on obj's named type. Detected when the callee is a
+	// SelectorExpr whose receiver isn't a package alias.
+	// (Stage 6 of plan-receivers.md.)
+	if sel, ok := e.Fun.(*ast.SelectorExpr); ok {
+		if !interp.isPackageSelector(sel) {
+			recv := interp.evalExpr(sel.X)
+			if decl := interp.lookupMethod(recv, sel.Sel.Name); decl != nil {
+				var args []Value
+				for _, a := range e.Args {
+					args = append(args, interp.evalExpr(a))
+				}
+				return interp.callMethod(decl, recv, args)
+			}
+		}
+	}
+
 	fn := interp.evalExpr(e.Fun)
 
 	// Builtin function
@@ -2028,4 +2052,110 @@ func (interp *Interpreter) closeFile(fd int) int {
 		return -1
 	}
 	return 0
+}
+
+// ============================================================
+// Methods (Stage 6 of plan-receivers.md)
+// ============================================================
+
+// isPackageSelector reports whether sel is a package-qualified
+// reference (pkg.Name) rather than a value expression. Used to
+// distinguish method calls from package-function calls at evalCall.
+func (interp *Interpreter) isPackageSelector(sel *ast.SelectorExpr) bool {
+	if id, ok := sel.X.(*ast.Ident); ok {
+		if _, ok := interp.importAliases[id.Name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// registerMethod records a method declaration on its base type. The
+// type checker has already validated that the receiver is a named type
+// defined in the current package, so we look up the type name from the
+// receiver's TypeExpr.
+func (interp *Interpreter) registerMethod(d *ast.FuncDecl) {
+	typeName := receiverTypeName(d.Recv.Type)
+	if typeName == "" {
+		return // shouldn't happen — type checker would have errored
+	}
+	if interp.methods[typeName] == nil {
+		interp.methods[typeName] = make(map[string]*ast.FuncDecl)
+	}
+	interp.methods[typeName][d.Name.Name] = d
+}
+
+// receiverTypeName walks a receiver TypeExpr to find the base named
+// type's name. Returns "" if the input doesn't reduce to a NamedType.
+func receiverTypeName(te ast.TypeExpr) string {
+	for te != nil {
+		switch t := te.(type) {
+		case *ast.NamedType:
+			return t.Name.Name
+		case *ast.PointerType:
+			te = t.Base
+		case *ast.ManagedPtrType:
+			te = t.Base
+		case *ast.ParenType:
+			te = t.Type
+		default:
+			return ""
+		}
+	}
+	return ""
+}
+
+// lookupMethod returns the method named methodName on a value's named
+// type, or nil if not found. Walks one level through pointer / managed
+// indirection (matching the type checker's auto-deref rule).
+func (interp *Interpreter) lookupMethod(recv Value, methodName string) *ast.FuncDecl {
+	typeName := valueTypeName(recv)
+	if typeName == "" {
+		return nil
+	}
+	mset, ok := interp.methods[typeName]
+	if !ok {
+		return nil
+	}
+	return mset[methodName]
+}
+
+// valueTypeName extracts the named-type name from a Value, walking one
+// level of pointer/managed indirection.
+func valueTypeName(v Value) string {
+	switch x := v.(type) {
+	case *StructVal:
+		if x.Typ != nil {
+			return x.Typ.Name
+		}
+	case *PointerVal:
+		if x.Addr != nil {
+			return valueTypeName(x.Addr.Val)
+		}
+	case *ManagedPtrVal:
+		if x.Addr != nil {
+			return valueTypeName(x.Addr.Val)
+		}
+	}
+	return ""
+}
+
+// callMethod evaluates a method call obj.M(args). The receiver is bound
+// as the method's first parameter (recv name from the FuncDecl); user
+// args follow.
+func (interp *Interpreter) callMethod(decl *ast.FuncDecl, recv Value, args []Value) Value {
+	// Build the args list with the receiver prepended.
+	all := make([]Value, 0, len(args)+1)
+	all = append(all, recv)
+	all = append(all, args...)
+
+	// Reuse callFuncInEnv with a synthetic decl whose Params include the
+	// receiver at index 0.
+	synth := *decl
+	combined := make([]*ast.ParamDecl, 0, len(decl.Params)+1)
+	combined = append(combined, decl.Recv)
+	combined = append(combined, decl.Params...)
+	synth.Params = combined
+	synth.Recv = nil
+	return interp.callFuncInEnv(&synth, all, interp.env)
 }
