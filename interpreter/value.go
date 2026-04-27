@@ -184,10 +184,10 @@ type FuncVal struct {
 	Types   map[string]types.Type // package type map (for cross-package type resolution)
 	Aliases map[string]string     // package import aliases
 	// Methods is the defining package's method registry — typeName →
-	// methodName → FuncDecl. Restored when this FuncVal is invoked so
+	// methodName → FuncVal. Restored when this FuncVal is invoked so
 	// method calls inside the body resolve in the defining package's
 	// context. (Stage 9 of plan-receivers.md.)
-	Methods map[string]map[string]*ast.FuncDecl
+	Methods map[string]map[string]*FuncVal
 }
 
 func (v *FuncVal) Type() types.Type { return v.Typ }

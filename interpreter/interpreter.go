@@ -34,9 +34,18 @@ type Interpreter struct {
 	env           *Env
 	funcs         map[string]*ast.FuncDecl
 	types         map[string]types.Type
-	// methods[typeName][methodName] is the FuncDecl for that method.
-	// Built during top-level-decl processing (Stage 6 of plan-receivers.md).
-	methods       map[string]map[string]*ast.FuncDecl
+	// methods[typeName][methodName] is a FuncVal capturing the method's
+	// defining package context (Env, types, aliases, methods). Cross-
+	// package method calls invoke the FuncVal so the body sees the
+	// defining package's free functions / types / methods.
+	// (Stage 6 of plan-receivers.md.)
+	methods       map[string]map[string]*FuncVal
+	// packageMethods[path][typeName][methodName] preserves each loaded
+	// package's method registry so cross-package method calls
+	// (`obj.M(...)` where obj's type lives in another package) can
+	// resolve. lookupMethod consults the current package first, then
+	// falls back to packageMethods.
+	packageMethods map[string]map[string]map[string]*FuncVal
 	stdout        *strings.Builder                 // captured output (nil = write to os.Stdout)
 	files         map[int]*os.File                 // open file descriptors
 	nextFD        int                              // next file descriptor to allocate
@@ -110,7 +119,8 @@ func New() *Interpreter {
 	interp := &Interpreter{
 		funcs:         make(map[string]*ast.FuncDecl),
 		types:         make(map[string]types.Type),
-		methods:       make(map[string]map[string]*ast.FuncDecl),
+		methods:       make(map[string]map[string]*FuncVal),
+		packageMethods: make(map[string]map[string]map[string]*FuncVal),
 		files:         map[int]*os.File{0: os.Stdin, 1: os.Stdout, 2: os.Stderr},
 		nextFD:        3,
 		packages:      make(map[string]*Env),
@@ -460,7 +470,7 @@ func (interp *Interpreter) LoadPackage(path string, file *ast.File, checker *typ
 	// Set up fresh state for this package
 	interp.funcs = make(map[string]*ast.FuncDecl)
 	interp.types = make(map[string]types.Type)
-	interp.methods = make(map[string]map[string]*ast.FuncDecl)
+	interp.methods = make(map[string]map[string]*FuncVal)
 	interp.importAliases = make(map[string]string)
 	interp.env = newEnv(nil)
 	interp.registerBuiltins() // builtins available in all packages
@@ -488,9 +498,10 @@ func (interp *Interpreter) LoadPackage(path string, file *ast.File, checker *typ
 		interp.execTopLevelDecl(d)
 	}
 
-	// Save the package env and types
+	// Save the package env, types, and methods
 	interp.packages[path] = interp.env
 	interp.packageTypes[path] = interp.types
+	interp.packageMethods[path] = interp.methods
 
 	// Restore interpreter state
 	interp.env = savedEnv
@@ -1401,7 +1412,7 @@ func (interp *Interpreter) evalCall(e *ast.CallExpr) Value {
 	callEnv := interp.env
 	var savedTypes map[string]types.Type
 	var savedAliases map[string]string
-	var savedMethods map[string]map[string]*ast.FuncDecl
+	var savedMethods map[string]map[string]*FuncVal
 	var swapped bool
 	if fv.Env != nil {
 		callEnv = fv.Env
@@ -2088,15 +2099,28 @@ func (interp *Interpreter) isPackageSelector(sel *ast.SelectorExpr) bool {
 // type checker has already validated that the receiver is a named type
 // defined in the current package, so we look up the type name from the
 // receiver's TypeExpr.
+//
+// The FuncVal we store captures the defining package's Env / types /
+// aliases / methods context — invoking the method later restores that
+// context so the body's free-function calls and type lookups resolve
+// in the defining package.
 func (interp *Interpreter) registerMethod(d *ast.FuncDecl) {
 	typeName := receiverTypeName(d.Recv.Type)
 	if typeName == "" {
 		return // shouldn't happen — type checker would have errored
 	}
-	if interp.methods[typeName] == nil {
-		interp.methods[typeName] = make(map[string]*ast.FuncDecl)
+	fv := &FuncVal{
+		Name:    d.Name.Name,
+		Decl:    d,
+		Env:     interp.env,
+		Types:   interp.types,
+		Aliases: interp.importAliases,
+		Methods: interp.methods,
 	}
-	interp.methods[typeName][d.Name.Name] = d
+	if interp.methods[typeName] == nil {
+		interp.methods[typeName] = make(map[string]*FuncVal)
+	}
+	interp.methods[typeName][d.Name.Name] = fv
 }
 
 // receiverTypeName walks a receiver TypeExpr to find the base named
@@ -2120,18 +2144,30 @@ func receiverTypeName(te ast.TypeExpr) string {
 }
 
 // lookupMethod returns the method named methodName on a value's named
-// type, or nil if not found. Walks one level through pointer / managed
-// indirection (matching the type checker's auto-deref rule).
-func (interp *Interpreter) lookupMethod(recv Value, methodName string) *ast.FuncDecl {
+// type as a FuncVal (which carries the defining package's context),
+// or nil if not found. Walks one level through pointer / managed
+// indirection (matching the type checker's auto-deref rule). Checks
+// the current package's methods first, then falls back to any other
+// loaded package — needed for cross-package method calls (e.g. main
+// calling a method defined on buf.CharBuf).
+func (interp *Interpreter) lookupMethod(recv Value, methodName string) *FuncVal {
 	typeName := valueTypeName(recv)
 	if typeName == "" {
 		return nil
 	}
-	mset, ok := interp.methods[typeName]
-	if !ok {
-		return nil
+	if mset, ok := interp.methods[typeName]; ok {
+		if m, ok := mset[methodName]; ok {
+			return m
+		}
 	}
-	return mset[methodName]
+	for _, pkgMethods := range interp.packageMethods {
+		if mset, ok := pkgMethods[typeName]; ok {
+			if m, ok := mset[methodName]; ok {
+				return m
+			}
+		}
+	}
+	return nil
 }
 
 // valueTypeName extracts the named-type name from a Value, walking one
@@ -2155,21 +2191,48 @@ func valueTypeName(v Value) string {
 }
 
 // callMethod evaluates a method call obj.M(args). The receiver is bound
-// as the method's first parameter (recv name from the FuncDecl); user
-// args follow.
-func (interp *Interpreter) callMethod(decl *ast.FuncDecl, recv Value, args []Value) Value {
+// as the method's first parameter; user args follow. The FuncVal
+// carries the defining package's context, which we swap into so the
+// body's free-function calls / type lookups / nested method calls
+// resolve in that package.
+func (interp *Interpreter) callMethod(fv *FuncVal, recv Value, args []Value) Value {
 	// Build the args list with the receiver prepended.
 	all := make([]Value, 0, len(args)+1)
 	all = append(all, recv)
 	all = append(all, args...)
 
-	// Reuse callFuncInEnv with a synthetic decl whose Params include the
-	// receiver at index 0.
+	// Synthetic decl with the receiver promoted to Params[0].
+	decl := fv.Decl
 	synth := *decl
 	combined := make([]*ast.ParamDecl, 0, len(decl.Params)+1)
 	combined = append(combined, decl.Recv)
 	combined = append(combined, decl.Params...)
 	synth.Params = combined
 	synth.Recv = nil
-	return interp.callFuncInEnv(&synth, all, interp.env)
+
+	// Swap into the defining package's context for the duration of the
+	// call (mirrors evalCall's FuncVal handling).
+	savedTypes := interp.types
+	savedAliases := interp.importAliases
+	savedMethods := interp.methods
+	if fv.Types != nil {
+		interp.types = fv.Types
+	}
+	if fv.Aliases != nil {
+		interp.importAliases = fv.Aliases
+	}
+	if fv.Methods != nil {
+		interp.methods = fv.Methods
+	}
+
+	callEnv := interp.env
+	if fv.Env != nil {
+		callEnv = fv.Env
+	}
+	result := interp.callFuncInEnv(&synth, all, callEnv)
+
+	interp.types = savedTypes
+	interp.importAliases = savedAliases
+	interp.methods = savedMethods
+	return result
 }
