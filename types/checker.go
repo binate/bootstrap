@@ -1215,6 +1215,15 @@ func (c *Checker) checkUnaryExpr(e *ast.UnaryExpr) Type {
 }
 
 func (c *Checker) checkCallExpr(e *ast.CallExpr) Type {
+	// Method-call dispatch: obj.M(args). tryMethodCall returns nil if e
+	// isn't a method call, and we fall back to the regular path.
+	// (Stage 3 of plan-receivers.md.)
+	if sel, ok := e.Fun.(*ast.SelectorExpr); ok {
+		if t := c.tryMethodCall(e, sel); t != nil {
+			return t
+		}
+	}
+
 	fnType := c.checkExpr(e.Fun)
 	ft, ok := fnType.(*FuncType)
 	if !ok {
@@ -1588,4 +1597,140 @@ func parseIntLit(s string) (int64, error) {
 		}
 	}
 	return strconv.ParseInt(s, 10, 64)
+}
+
+// ============================================================
+// Method-call type checking (Stage 3 of plan-receivers.md)
+// ============================================================
+
+// tryMethodCall handles `obj.M(args)` when M is a method on obj's base
+// named type. Returns the call's result type, or nil if e isn't a
+// method call (caller falls back to the regular function-call path).
+func (c *Checker) tryMethodCall(e *ast.CallExpr, sel *ast.SelectorExpr) Type {
+	// Skip package-qualified calls (pkg.Func(...)).
+	if id, ok := sel.X.(*ast.Ident); ok {
+		if sym := c.scope.lookup(id.Name); sym != nil && sym.Kind == PkgSym {
+			return nil
+		}
+	}
+
+	recvType := c.checkExpr(sel.X)
+	named := receiverBaseNamed(recvType)
+	if named == nil {
+		return nil
+	}
+	m := named.LookupMethod(sel.Sel.Name)
+	if m == nil {
+		return nil
+	}
+	return c.checkResolvedMethodCall(e, sel, recvType, m)
+}
+
+// checkResolvedMethodCall validates a method call once the method has
+// been resolved.
+func (c *Checker) checkResolvedMethodCall(e *ast.CallExpr, sel *ast.SelectorExpr, recvType Type, m *Method) Type {
+	if !receiverAssignable(recvType, m.RecvType) {
+		c.errorf(sel.Pos(), "cannot call method %s: receiver type %s not assignable to %s",
+			m.Name, recvType, m.RecvType)
+	}
+
+	ft := m.Func
+	numUserParams := len(ft.Params) - 1
+	if len(e.Args) != numUserParams {
+		c.errorf(e.Fun.Pos(), "wrong number of arguments: got %d, want %d",
+			len(e.Args), numUserParams)
+	} else {
+		for i, arg := range e.Args {
+			at := c.checkExpr(arg)
+			if !AssignableTo(at, ft.Params[i+1].Type) {
+				c.errorf(arg.Pos(), "cannot pass %s as %s", at, ft.Params[i+1].Type)
+			}
+		}
+	}
+
+	if len(ft.Results) == 0 {
+		return Typ_void
+	}
+	if len(ft.Results) == 1 {
+		return ft.Results[0]
+	}
+	return ft
+}
+
+// receiverBaseNamed unwraps a receiver type's outer pointer/managed
+// wrappers and returns the underlying NamedType, or nil.
+func receiverBaseNamed(t Type) *NamedType {
+	if t == nil {
+		return nil
+	}
+	t = ResolveAlias(t)
+	switch tt := t.(type) {
+	case *PointerType:
+		inner := ResolveAlias(tt.Elem)
+		if nt, ok := inner.(*NamedType); ok {
+			return nt
+		}
+	case *ManagedPtrType:
+		inner := ResolveAlias(tt.Elem)
+		if nt, ok := inner.(*NamedType); ok {
+			return nt
+		}
+	case *NamedType:
+		return tt
+	}
+	return nil
+}
+
+// receiverAssignable reports whether an expression of type src can be
+// passed as the receiver of a method declared with receiver type dst,
+// applying the smoothing rules:
+//
+//   src @T  → dst @T / *T / T   (OK; deref allowed)
+//   src *T  → dst *T / T        (OK; deref allowed)
+//   src *T  → dst @T            (REJECT; never raw → managed)
+//   src T   → dst T / *T        (OK; auto-take-address)
+//   src T   → dst @T            (REJECT)
+//
+// Bootstrap subset doesn't include the `const` modifier, so const-flow
+// rules from claude-notes.md:828 are not enforced here (the self-hosted
+// checker enforces them).
+func receiverAssignable(src, dst Type) bool {
+	srcBase, srcKind := receiverShape(src)
+	dstBase, dstKind := receiverShape(dst)
+	if srcBase == nil || dstBase == nil {
+		return false
+	}
+	if !Identical(srcBase, dstBase) {
+		return false
+	}
+	// dst @T requires src @T (no implicit T → @T or *T → @T).
+	if dstKind == 2 && srcKind != 2 {
+		return false
+	}
+	return true
+}
+
+// receiverShape reduces a type to (basetype, kind):
+//   kind: 0 = value (T), 1 = raw pointer (*T), 2 = managed pointer (@T)
+// Returns (nil, 0) if t isn't (a wrapper around) a NamedType.
+func receiverShape(t Type) (*NamedType, int) {
+	if t == nil {
+		return nil, 0
+	}
+	t = ResolveAlias(t)
+	switch tt := t.(type) {
+	case *PointerType:
+		inner := ResolveAlias(tt.Elem)
+		if nt, ok := inner.(*NamedType); ok {
+			return nt, 1
+		}
+	case *ManagedPtrType:
+		inner := ResolveAlias(tt.Elem)
+		if nt, ok := inner.(*NamedType); ok {
+			return nt, 2
+		}
+	case *NamedType:
+		return tt, 0
+	}
+	return nil, 0
 }

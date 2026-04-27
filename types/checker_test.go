@@ -1000,3 +1000,187 @@ func (p *Point) Sum() int {
 	c := checkFile(t, src)
 	expectNoErrors(t, c)
 }
+
+// ============================================================
+// Method calls (Stage 3 of plan-receivers.md)
+// ============================================================
+
+func TestCheckMethodCallPointerOnPointer(t *testing.T) {
+	src := `package "main"
+
+type Point struct { x int }
+
+func (p *Point) X() int {
+	return p.x
+}
+
+func main() {
+	var pp *Point = nil
+	var v int = pp.X()
+	println(v)
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+func TestCheckMethodCallValueOnValue(t *testing.T) {
+	src := `package "main"
+
+type Counter struct { n int }
+
+func (c Counter) Get() int {
+	return c.n
+}
+
+func main() {
+	var ctr Counter
+	var v int = ctr.Get()
+	println(v)
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+// @T receiver expression on @T method.
+func TestCheckMethodCallManagedOnManaged(t *testing.T) {
+	src := `package "main"
+
+type Node struct { val int }
+
+func (n @Node) Val() int {
+	return n.val
+}
+
+func main() {
+	var n @Node = make(Node)
+	var v int = n.Val()
+	println(v)
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+// @T receiver expression on *T method (managed → raw smoothing).
+func TestCheckMethodCallManagedOnPointer(t *testing.T) {
+	src := `package "main"
+
+type Node struct { val int }
+
+func (n *Node) Val() int {
+	return n.val
+}
+
+func main() {
+	var n @Node = make(Node)
+	var v int = n.Val()
+	println(v)
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+// *T receiver expression on T method (auto-deref to value).
+func TestCheckMethodCallPointerOnValue(t *testing.T) {
+	src := `package "main"
+
+type Counter struct { n int }
+
+func (c Counter) Get() int {
+	return c.n
+}
+
+func main() {
+	var pp *Counter = nil
+	var v int = pp.Get()
+	println(v)
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
+
+// Argument count mismatch is reported.
+func TestCheckMethodCallWrongArgCount(t *testing.T) {
+	src := `package "main"
+
+type Point struct { x int }
+
+func (p *Point) Set(v int) {
+	p.x = v
+}
+
+func main() {
+	var pp *Point = nil
+	pp.Set()
+}
+`
+	c := checkFile(t, src)
+	expectError(t, c, "wrong number of arguments")
+}
+
+// Method call on a type with no such method is an error.
+func TestCheckMethodCallUnknownMethod(t *testing.T) {
+	src := `package "main"
+
+type Point struct { x int }
+
+func main() {
+	var pp *Point = nil
+	pp.MissingMethod()
+}
+`
+	c := checkFile(t, src)
+	expectError(t, c, "")
+}
+
+// *T receiver expression cannot satisfy @T method (no raw → managed).
+func TestCheckMethodCallPointerOnManagedRejected(t *testing.T) {
+	src := `package "main"
+
+type Node struct { val int }
+
+func (n @Node) Val() int {
+	return n.val
+}
+
+func main() {
+	var pp *Node = nil
+	pp.Val()
+}
+`
+	c := checkFile(t, src)
+	expectError(t, c, "")
+}
+
+// Two methods on different types with the same name — call resolves
+// based on the receiver's type.
+func TestCheckMethodCallDispatchByType(t *testing.T) {
+	src := `package "main"
+
+type A struct { v int }
+type B struct { v bool }
+
+func (a *A) Get() int {
+	return a.v
+}
+
+func (b *B) Get() bool {
+	return b.v
+}
+
+func main() {
+	var pa *A = nil
+	var pb *B = nil
+	var x int = pa.Get()
+	var y bool = pb.Get()
+	println(x)
+	println(y)
+}
+`
+	c := checkFile(t, src)
+	expectNoErrors(t, c)
+}
