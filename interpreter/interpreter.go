@@ -519,18 +519,23 @@ func (interp *Interpreter) RunTestFunc(pkgPath string, funcName string) (errMsg 
 		return fmt.Sprintf("%s.%s is not a function", pkgPath, funcName)
 	}
 
-	// Set up the package's type/alias context
+	// Set up the package's type/alias/method context
 	savedTypes := interp.types
 	savedAliases := interp.importAliases
+	savedMethods := interp.methods
 	if fv.Types != nil {
 		interp.types = fv.Types
 	}
 	if fv.Aliases != nil {
 		interp.importAliases = fv.Aliases
 	}
+	if fv.Methods != nil {
+		interp.methods = fv.Methods
+	}
 	defer func() {
 		interp.types = savedTypes
 		interp.importAliases = savedAliases
+		interp.methods = savedMethods
 	}()
 
 	result := interp.callFuncInEnv(fv.Decl, nil, fv.Env)
@@ -583,6 +588,7 @@ func (interp *Interpreter) execTopLevelDecl(d ast.Decl) {
 			Env:     interp.env,
 			Types:   interp.types,
 			Aliases: interp.importAliases,
+			Methods: interp.methods,
 		})
 	case *ast.VarDecl:
 		interp.execVarDecl(d)
@@ -1395,19 +1401,27 @@ func (interp *Interpreter) evalCall(e *ast.CallExpr) Value {
 	callEnv := interp.env
 	var savedTypes map[string]types.Type
 	var savedAliases map[string]string
+	var savedMethods map[string]map[string]*ast.FuncDecl
+	var swapped bool
 	if fv.Env != nil {
 		callEnv = fv.Env
 	}
 	if fv.Types != nil {
 		savedTypes = interp.types
 		savedAliases = interp.importAliases
+		savedMethods = interp.methods
+		swapped = true
 		interp.types = fv.Types
 		interp.importAliases = fv.Aliases
+		if fv.Methods != nil {
+			interp.methods = fv.Methods
+		}
 	}
 	result := interp.callFuncInEnv(fv.Decl, args, callEnv)
-	if savedTypes != nil {
+	if swapped {
 		interp.types = savedTypes
 		interp.importAliases = savedAliases
+		interp.methods = savedMethods
 	}
 	return result
 }
