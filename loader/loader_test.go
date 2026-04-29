@@ -637,5 +637,148 @@ func TestExtractImports(t *testing.T) {
 	}
 }
 
-// Ensure unused import is not flagged
+// ============================================================
+// Path-split helpers (BniPath / ImplPath)
+// ============================================================
+
+func TestNew_SeedsBothPaths(t *testing.T) {
+	l := New("/my/root")
+	if l.Root != "/my/root" {
+		t.Errorf("Root = %q, want /my/root", l.Root)
+	}
+	if !equalSlice(l.BniPath, []string{"/my/root"}) {
+		t.Errorf("BniPath = %v, want [/my/root]", l.BniPath)
+	}
+	if !equalSlice(l.ImplPath, []string{"/my/root"}) {
+		t.Errorf("ImplPath = %v, want [/my/root]", l.ImplPath)
+	}
+}
+
+func TestAddRoot_BothPaths(t *testing.T) {
+	l := New("/a")
+	l.AddRoot("/b")
+	if !equalSlice(l.BniPath, []string{"/a", "/b"}) {
+		t.Errorf("BniPath = %v, want [/a /b]", l.BniPath)
+	}
+	if !equalSlice(l.ImplPath, []string{"/a", "/b"}) {
+		t.Errorf("ImplPath = %v, want [/a /b]", l.ImplPath)
+	}
+}
+
+func TestAddRoot_Dedup(t *testing.T) {
+	l := New("/a")
+	l.AddRoot("/a")
+	if len(l.BniPath) != 1 {
+		t.Errorf("BniPath dup not skipped: %v", l.BniPath)
+	}
+	if len(l.ImplPath) != 1 {
+		t.Errorf("ImplPath dup not skipped: %v", l.ImplPath)
+	}
+}
+
+func TestAddBniPath_Independent(t *testing.T) {
+	l := New("/a")
+	l.AddBniPath("/bni-only")
+	if !equalSlice(l.BniPath, []string{"/a", "/bni-only"}) {
+		t.Errorf("BniPath = %v, want [/a /bni-only]", l.BniPath)
+	}
+	if !equalSlice(l.ImplPath, []string{"/a"}) {
+		t.Errorf("ImplPath should be unchanged, got %v", l.ImplPath)
+	}
+}
+
+func TestAddImplPath_Independent(t *testing.T) {
+	l := New("/a")
+	l.AddImplPath("/impl-only")
+	if !equalSlice(l.ImplPath, []string{"/a", "/impl-only"}) {
+		t.Errorf("ImplPath = %v, want [/a /impl-only]", l.ImplPath)
+	}
+	if !equalSlice(l.BniPath, []string{"/a"}) {
+		t.Errorf("BniPath should be unchanged, got %v", l.BniPath)
+	}
+}
+
+func TestAddBniPath_Dedup(t *testing.T) {
+	l := New("/a")
+	l.AddBniPath("/a")
+	if len(l.BniPath) != 1 {
+		t.Errorf("BniPath dup not skipped: %v", l.BniPath)
+	}
+}
+
+func TestAddImplPath_Dedup(t *testing.T) {
+	l := New("/a")
+	l.AddImplPath("/a")
+	if len(l.ImplPath) != 1 {
+		t.Errorf("ImplPath dup not skipped: %v", l.ImplPath)
+	}
+}
+
+// LoadImports finds the .bni on BniPath and the impl dir on ImplPath
+// from different roots — exercises the split-search code path.
+func TestLoadImports_SplitPaths(t *testing.T) {
+	bniRoot := t.TempDir()
+	implRoot := t.TempDir()
+
+	bniDir := filepath.Join(bniRoot, "pkg")
+	if err := os.MkdirAll(bniDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bniFile := filepath.Join(bniDir, "foo.bni")
+	bniSrc := []byte(`package "pkg/foo"` + "\n" + `func Hello()` + "\n")
+	if err := os.WriteFile(bniFile, bniSrc, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	implDir := filepath.Join(implRoot, "pkg", "foo")
+	if err := os.MkdirAll(implDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	implFile := filepath.Join(implDir, "foo.bn")
+	implSrc := []byte(`package "pkg/foo"` + "\n" + `func Hello() {}` + "\n")
+	if err := os.WriteFile(implFile, implSrc, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Loader with disjoint paths: bniRoot only on BniPath, implRoot
+	// only on ImplPath. The loader must pair them across paths.
+	l := &Loader{
+		Root:     bniRoot,
+		BniPath:  []string{bniRoot},
+		ImplPath: []string{implRoot},
+		Packages: make(map[string]*Package),
+		loading:  make(map[string]bool),
+	}
+	l.LoadImports([]*ast.ImportSpec{
+		{Path: &ast.StringLit{Value: `"pkg/foo"`}},
+	})
+	if len(l.Errors) > 0 {
+		t.Fatalf("unexpected errors: %v", l.Errors)
+	}
+	pkg := l.Packages["pkg/foo"]
+	if pkg == nil {
+		t.Fatal("pkg/foo not loaded")
+	}
+	if pkg.BNI == nil {
+		t.Error("pkg/foo BNI should be set (from BniPath)")
+	}
+	if pkg.Merged == nil {
+		t.Error("pkg/foo Merged should be set (from ImplPath)")
+	}
+}
+
+func equalSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// Ensure unused imports are not flagged
 var _ = token.Pos{}
+var _ = strings.HasSuffix

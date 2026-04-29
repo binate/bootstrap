@@ -21,10 +21,23 @@ type Package struct {
 	Builtin bool      // true for Go-backed packages (e.g. pkg/bootstrap)
 }
 
-// Loader discovers and parses packages from a project root.
+// Loader discovers and parses packages.
+//
+// Resolution uses two independent, ordered search paths:
+//
+//   - BniPath: directories searched for `<dir>/<path>.bni` interface
+//     files.
+//   - ImplPath: directories searched for `<dir>/<path>/` impl
+//     directories (a directory provides an impl iff it contains at
+//     least one `.bn` file). Future: also `.o`/`.a`/`.so` artifacts.
+//
+// First hit wins on each path; the two are searched independently, so
+// interface and impl can come from different roots.
 type Loader struct {
 	Root         string              // primary project root directory
-	Roots        []string            // all search roots (primary + additional)
+	Roots        []string            // DEPRECATED: union of BniPath/ImplPath; kept for back-compat (Stage 6 removes)
+	BniPath      []string            // search dirs for .bni interface files
+	ImplPath     []string            // search dirs for impl directories
 	Packages     map[string]*Package // import path -> parsed package
 	Order        []string            // topological order (dependencies first)
 	Errors       []string            // accumulated errors
@@ -33,25 +46,54 @@ type Loader struct {
 	loading      map[string]bool     // cycle detection: packages being loaded
 }
 
-// New creates a loader with the given project root.
+// New creates a loader with the given project root, seeding both
+// BniPath and ImplPath with that root.
 func New(root string) *Loader {
-	return &Loader{
+	l := &Loader{
 		Root:     root,
-		Roots:    []string{root},
 		Packages: make(map[string]*Package),
 		loading:  make(map[string]bool),
 	}
+	l.AddRoot(root)
+	return l
 }
 
-// AddRoot adds an additional search root for package resolution.
-// Duplicate roots are ignored.
+// AddRoot appends a directory to BOTH the interface and impl search
+// paths. Sugar for AddBniPath(root) + AddImplPath(root); the common
+// monorepo case where interfaces and impls share the same tree.
+// Skips duplicates on each path independently.
 func (l *Loader) AddRoot(root string) {
+	l.AddBniPath(root)
+	l.AddImplPath(root)
+	// Keep the deprecated combined Roots slice in sync for back-compat.
 	for _, r := range l.Roots {
 		if r == root {
 			return
 		}
 	}
 	l.Roots = append(l.Roots, root)
+}
+
+// AddBniPath appends a directory to the interface search path,
+// skipping duplicates.
+func (l *Loader) AddBniPath(dir string) {
+	for _, d := range l.BniPath {
+		if d == dir {
+			return
+		}
+	}
+	l.BniPath = append(l.BniPath, dir)
+}
+
+// AddImplPath appends a directory to the impl search path, skipping
+// duplicates.
+func (l *Loader) AddImplPath(dir string) {
+	for _, d := range l.ImplPath {
+		if d == dir {
+			return
+		}
+	}
+	l.ImplPath = append(l.ImplPath, dir)
 }
 
 // RegisterBuiltin registers a builtin package that has no .bn files on disk.
@@ -92,38 +134,42 @@ func (l *Loader) loadPackage(path string, imp *ast.ImportSpec) {
 		fmt.Fprintf(os.Stderr, "[verbose] loading package %s\n", path)
 	}
 
-	// Discover files across all roots
+	// Two independent search loops: BniPath for the .bni interface,
+	// ImplPath for the impl directory. First hit on each wins.
 	var bniPath, implDir string
-	for _, searchRoot := range l.Roots {
-		if pkg.BNI == nil {
-			candidate := filepath.Join(searchRoot, path+".bni")
-			if data, err := os.ReadFile(candidate); err == nil {
-				bniPath = candidate
-				p := parser.NewInterface(data, bniPath)
-				f := p.ParseFile()
-				if len(p.Errors()) > 0 {
-					for _, e := range p.Errors() {
-						l.Errors = append(l.Errors, e.Error())
-					}
-					return
-				}
-				declPkg := unquote(f.PkgName.Value)
-				if declPkg != path && declPkg != "main" {
-					l.Errors = append(l.Errors, fmt.Sprintf(
-						"%s: package declaration %q does not match import path %q",
-						bniPath, declPkg, path))
-					return
-				}
-				pkg.BNI = f
-				pkg.Imports = append(pkg.Imports, extractImports(f)...)
-			}
+	for _, dir := range l.BniPath {
+		candidate := filepath.Join(dir, path+".bni")
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			continue
 		}
-		if implDir == "" {
-			candidate := filepath.Join(searchRoot, path)
-			if _, err := os.ReadDir(candidate); err == nil {
-				implDir = candidate
+		bniPath = candidate
+		p := parser.NewInterface(data, bniPath)
+		f := p.ParseFile()
+		if len(p.Errors()) > 0 {
+			for _, e := range p.Errors() {
+				l.Errors = append(l.Errors, e.Error())
 			}
+			return
 		}
+		declPkg := unquote(f.PkgName.Value)
+		if declPkg != path && declPkg != "main" {
+			l.Errors = append(l.Errors, fmt.Sprintf(
+				"%s: package declaration %q does not match import path %q",
+				bniPath, declPkg, path))
+			return
+		}
+		pkg.BNI = f
+		pkg.Imports = append(pkg.Imports, extractImports(f)...)
+		break
+	}
+	for _, dir := range l.ImplPath {
+		candidate := filepath.Join(dir, path)
+		if _, err := os.ReadDir(candidate); err != nil {
+			continue
+		}
+		implDir = candidate
+		break
 	}
 
 	if pkg.BNI == nil && implDir == "" {
