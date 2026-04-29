@@ -35,7 +35,6 @@ type Package struct {
 // interface and impl can come from different roots.
 type Loader struct {
 	Root         string              // primary project root directory
-	Roots        []string            // DEPRECATED: union of BniPath/ImplPath; kept for back-compat (Stage 6 removes)
 	BniPath      []string            // search dirs for .bni interface files
 	ImplPath     []string            // search dirs for impl directories
 	Packages     map[string]*Package // import path -> parsed package
@@ -65,13 +64,6 @@ func New(root string) *Loader {
 func (l *Loader) AddRoot(root string) {
 	l.AddBniPath(root)
 	l.AddImplPath(root)
-	// Keep the deprecated combined Roots slice in sync for back-compat.
-	for _, r := range l.Roots {
-		if r == root {
-			return
-		}
-	}
-	l.Roots = append(l.Roots, root)
 }
 
 // AddBniPath appends a directory to the interface search path,
