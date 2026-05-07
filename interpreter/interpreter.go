@@ -1252,6 +1252,32 @@ func (interp *Interpreter) evalBinaryOp(pos token.Pos, op token.Type, lhs, rhs V
 		}
 	}
 
+	// Pointer identity comparisons (@T == @T, *T == *T).  Two
+	// managed/raw pointers are equal iff they share the same
+	// HeapObject — the same allocation.  Mirrors Go's `==` on
+	// pointers; the compiled runtime gets this for free since
+	// pointers are just int values at the LLVM level.
+	if lv, ok := lhs.(*ManagedPtrVal); ok {
+		if rv, ok := rhs.(*ManagedPtrVal); ok {
+			switch op {
+			case token.EQ:
+				return &BoolVal{Val: lv.Addr == rv.Addr}
+			case token.NEQ:
+				return &BoolVal{Val: lv.Addr != rv.Addr}
+			}
+		}
+	}
+	if lv, ok := lhs.(*PointerVal); ok {
+		if rv, ok := rhs.(*PointerVal); ok {
+			switch op {
+			case token.EQ:
+				return &BoolVal{Val: lv.Addr == rv.Addr}
+			case token.NEQ:
+				return &BoolVal{Val: lv.Addr != rv.Addr}
+			}
+		}
+	}
+
 	panic(fmt.Sprintf("unsupported binary operation: %s %s %s", lhs.Type(), op, rhs.Type()))
 }
 
