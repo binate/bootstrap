@@ -335,7 +335,7 @@ func runDirTests(root string, addRoots, bniPaths, implPaths []string, dir string
 		if fd.Recv != nil {
 			continue // methods can't be top-level test functions
 		}
-		if len(fd.Params) == 0 && isTestResultReturn(fd) {
+		if len(fd.Params) == 0 && isTestResultReturn(fd, merged.Decls) {
 			testNames = append(testNames, fd.Name.Name)
 		} else {
 			fmt.Fprintf(os.Stderr, "warning: %s has Test prefix but wrong signature (want TestXxx() testing.TestResult)\n", fd.Name.Name)
@@ -462,7 +462,7 @@ func runTests(root string, addRoots, bniPaths, implPaths []string, testPkgs []st
 			if !strings.HasPrefix(fd.Name.Name, "Test") || fd.Body == nil {
 				continue
 			}
-			if len(fd.Params) == 0 && isTestResultReturn(fd) {
+			if len(fd.Params) == 0 && isTestResultReturn(fd, pkg.Merged.Decls) {
 				testNames = append(testNames, fd.Name.Name)
 			} else {
 				fmt.Fprintf(os.Stderr, "warning: %s has Test prefix but wrong signature (want TestXxx() testing.TestResult)\n", fd.Name.Name)
@@ -505,8 +505,12 @@ func runTests(root string, addRoots, bniPaths, implPaths []string, testPkgs []st
 }
 
 // isTestResultReturn checks whether a function has a single return type
-// that is testing.TestResult (or equivalently @[]char).
-func isTestResultReturn(fd *ast.FuncDecl) bool {
+// that is testing.TestResult, a local alias to @[]char (so the testing
+// package's own tests can return `TestResult` unqualified), or the
+// underlying @[]char / []char shape directly. `decls` is the
+// surrounding package's decl list, walked to resolve unqualified
+// aliases.
+func isTestResultReturn(fd *ast.FuncDecl, decls []ast.Decl) bool {
 	if len(fd.Results) != 1 {
 		return false
 	}
@@ -516,8 +520,18 @@ func isTestResultReturn(fd *ast.FuncDecl) bool {
 		if nt.Pkg != nil && nt.Pkg.Name == "testing" && nt.Name.Name == "TestResult" {
 			return true
 		}
+		// Unqualified named type: try resolving a local alias.
+		if nt.Pkg == nil {
+			if target := lookupLocalTypeAlias(decls, nt.Name.Name); target != nil {
+				return isManagedCharSliceExpr(target) || isRawCharSliceExpr(target)
+			}
+		}
 	}
-	// Accept @[]char directly
+	return isManagedCharSliceExpr(r) || isRawCharSliceExpr(r)
+}
+
+// isManagedCharSliceExpr reports whether r is the `@[]char` type expression.
+func isManagedCharSliceExpr(r ast.TypeExpr) bool {
 	if ms, ok := r.(*ast.ManagedSliceType); ok {
 		if nt, ok := ms.Elem.(*ast.NamedType); ok {
 			if nt.Pkg == nil && nt.Name.Name == "char" {
@@ -525,7 +539,12 @@ func isTestResultReturn(fd *ast.FuncDecl) bool {
 			}
 		}
 	}
-	// Accept []char directly (legacy)
+	return false
+}
+
+// isRawCharSliceExpr reports whether r is the `*[]char` / `[]char`
+// (raw slice) type expression. Accepted as legacy.
+func isRawCharSliceExpr(r ast.TypeExpr) bool {
 	if st, ok := r.(*ast.SliceType); ok {
 		if nt, ok := st.Elem.(*ast.NamedType); ok {
 			if nt.Pkg == nil && nt.Name.Name == "char" {
@@ -534,6 +553,21 @@ func isTestResultReturn(fd *ast.FuncDecl) bool {
 		}
 	}
 	return false
+}
+
+// lookupLocalTypeAlias scans `decls` for `type <name> = <T>` and
+// returns T's TypeExpr if found, or nil. Only follows one level.
+func lookupLocalTypeAlias(decls []ast.Decl, name string) ast.TypeExpr {
+	for _, d := range decls {
+		td, ok := d.(*ast.TypeDecl)
+		if !ok || !td.Assign {
+			continue
+		}
+		if td.Name.Name == name {
+			return td.Type
+		}
+	}
+	return nil
 }
 
 // runProgram runs a Binate program (the normal non-test mode).
