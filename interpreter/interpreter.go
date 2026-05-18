@@ -1283,6 +1283,24 @@ func (interp *Interpreter) evalBinaryOp(pos token.Pos, op token.Type, lhs, rhs V
 
 func (interp *Interpreter) evalIntBinaryOp(pos token.Pos, op token.Type, lv, rv *IntVal) Value {
 	l, r := lv.Val, rv.Val
+	// Dispatch on signedness for the ops where it matters: division,
+	// modulo, ordering comparisons, and arithmetic right shift.  For
+	// + - * & | ^ <<, signed and unsigned share the same bit
+	// pattern, so the operand-type signedness doesn't change the
+	// result. EQ / NEQ are bit-equality and also signedness-
+	// independent.
+	//
+	// Operands carry their declared Binate type in lv.Typ / rv.Typ;
+	// the type checker enforces matching signedness on the two
+	// sides, so it's enough to check lv.Typ.  An unsigned uint64
+	// value with the high bit set is stored as a negative int64
+	// here, and ordering / division must reinterpret through uint64
+	// (rather than going through Go's signed int64 semantics, which
+	// would treat the value as negative).
+	signed := true
+	if lv.Typ != nil && !lv.Typ.Signed {
+		signed = false
+	}
 	switch op {
 	case token.PLUS:
 		return &IntVal{Val: l + r, Typ: lv.Typ}
@@ -1294,12 +1312,18 @@ func (interp *Interpreter) evalIntBinaryOp(pos token.Pos, op token.Type, lv, rv 
 		if r == 0 {
 			runtimePanic(pos, "division by zero")
 		}
-		return &IntVal{Val: l / r, Typ: lv.Typ}
+		if signed {
+			return &IntVal{Val: l / r, Typ: lv.Typ}
+		}
+		return &IntVal{Val: int64(uint64(l) / uint64(r)), Typ: lv.Typ}
 	case token.PERCENT:
 		if r == 0 {
 			runtimePanic(pos, "division by zero")
 		}
-		return &IntVal{Val: l % r, Typ: lv.Typ}
+		if signed {
+			return &IntVal{Val: l % r, Typ: lv.Typ}
+		}
+		return &IntVal{Val: int64(uint64(l) % uint64(r)), Typ: lv.Typ}
 	case token.AMP:
 		return &IntVal{Val: l & r, Typ: lv.Typ}
 	case token.PIPE:
@@ -1309,19 +1333,36 @@ func (interp *Interpreter) evalIntBinaryOp(pos token.Pos, op token.Type, lv, rv 
 	case token.SHL:
 		return &IntVal{Val: l << uint(r), Typ: lv.Typ}
 	case token.SHR:
-		return &IntVal{Val: l >> uint(r), Typ: lv.Typ}
+		// Arithmetic shift for signed (sign-extends); logical shift
+		// (zero-fills) for unsigned.
+		if signed {
+			return &IntVal{Val: l >> uint(r), Typ: lv.Typ}
+		}
+		return &IntVal{Val: int64(uint64(l) >> uint(r)), Typ: lv.Typ}
 	case token.EQ:
 		return &BoolVal{Val: l == r}
 	case token.NEQ:
 		return &BoolVal{Val: l != r}
 	case token.LT:
-		return &BoolVal{Val: l < r}
+		if signed {
+			return &BoolVal{Val: l < r}
+		}
+		return &BoolVal{Val: uint64(l) < uint64(r)}
 	case token.GT:
-		return &BoolVal{Val: l > r}
+		if signed {
+			return &BoolVal{Val: l > r}
+		}
+		return &BoolVal{Val: uint64(l) > uint64(r)}
 	case token.LEQ:
-		return &BoolVal{Val: l <= r}
+		if signed {
+			return &BoolVal{Val: l <= r}
+		}
+		return &BoolVal{Val: uint64(l) <= uint64(r)}
 	case token.GEQ:
-		return &BoolVal{Val: l >= r}
+		if signed {
+			return &BoolVal{Val: l >= r}
+		}
+		return &BoolVal{Val: uint64(l) >= uint64(r)}
 	default:
 		panic(fmt.Sprintf("unsupported int operator: %s", op))
 	}
