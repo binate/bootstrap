@@ -41,7 +41,13 @@ type IntVal struct {
 }
 
 func (v *IntVal) Type() types.Type { return v.Typ }
-func (v *IntVal) String() string   { return fmt.Sprintf("%d", v.Val) }
+
+func (v *IntVal) String() string {
+	if v.Typ != nil && !v.Typ.Signed {
+		return fmt.Sprintf("%d", uint64(v.Val))
+	}
+	return fmt.Sprintf("%d", v.Val)
+}
 
 // BoolVal represents a boolean value.
 type BoolVal struct {
