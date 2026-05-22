@@ -21,12 +21,10 @@ func main() {
 
 	// Parse CLI flags.
 	//
-	// Long flag style: `--word` is the standard. Single-dash forms
-	// (`-root`, `-add-root`, `-verbose`, `-test`, `-cpuprofile`) are
-	// accepted as back-compat aliases. Single `-` is reserved for short
-	// flags (`-v`, `-I`, `-L`).
-	var root string
-	var addRoots []string
+	// Long flag style: `--word` is the standard.  Single-dash forms
+	// (`-verbose`, `-test`, `-cpuprofile`) are accepted as
+	// back-compat aliases.  Single `-` is reserved for short flags
+	// (`-v`, `-I`, `-L`).
 	var bniPaths []string
 	var implPaths []string
 	var testMode bool
@@ -40,16 +38,6 @@ func main() {
 		if arg == "--" {
 			progArgs = os.Args[i+1:]
 			break
-		}
-		if (arg == "-root" || arg == "--root") && i+1 < len(os.Args) {
-			root = os.Args[i+1]
-			i += 2
-			continue
-		}
-		if (arg == "-add-root" || arg == "--add-root") && i+1 < len(os.Args) {
-			addRoots = append(addRoots, os.Args[i+1])
-			i += 2
-			continue
 		}
 		if (arg == "-I" || arg == "--interface-path") && i+1 < len(os.Args) {
 			bniPaths = append(bniPaths, splitColon(os.Args[i+1])...)
@@ -121,14 +109,14 @@ func main() {
 		}
 		if len(dirArgs) > 0 {
 			for _, dir := range dirArgs {
-				runDirTests(root, addRoots, bniPaths, implPaths, dir, verbose)
+				runDirTests(bniPaths, implPaths, dir, verbose)
 			}
 		} else {
 			// Validate that test arguments are package paths, not file paths
 			for _, arg := range pkgArgs {
 				if strings.HasSuffix(arg, ".bn") || strings.HasSuffix(arg, ".bni") {
 					fmt.Fprintf(os.Stderr, "error: -test takes package paths, not files: %s\n", arg)
-					fmt.Fprintf(os.Stderr, "  use: binate -test [-root dir] pkg/foo\n")
+					fmt.Fprintf(os.Stderr, "  use: binate -test [-I dir] pkg/foo\n")
 					os.Exit(1)
 				}
 				if filepath.IsAbs(arg) {
@@ -136,11 +124,22 @@ func main() {
 					os.Exit(1)
 				}
 			}
-			runTests(root, addRoots, bniPaths, implPaths, pkgArgs, verbose)
+			runTests(bniPaths, implPaths, pkgArgs, verbose)
 		}
 	} else {
-		runProgram(root, addRoots, bniPaths, implPaths, filenames, progArgs, verbose)
+		runProgram(bniPaths, implPaths, filenames, progArgs, verbose)
 	}
+}
+
+// primaryRoot returns the first -I entry as the project root.  Empty
+// if no -I was passed; callers fall back to the current working
+// directory (the historical behavior under the removed `-root` flag
+// when -root was also empty).
+func primaryRoot(bniPaths []string) string {
+	if len(bniPaths) > 0 {
+		return bniPaths[0]
+	}
+	return ""
 }
 
 // splitColon splits a string on ':' (POSIX PATH style). Empty entries
@@ -157,9 +156,8 @@ func splitColon(s string) []string {
 }
 
 // applyPathFlags appends -I / -L entries to the loader's BniPath /
-// ImplPath. CLI-supplied paths come AFTER --root-derived paths, so
-// per-flag entries extend (rather than replace) the root-derived
-// defaults.
+// ImplPath beyond the primary root (loader.New adds the first one
+// already).
 func applyPathFlags(ldr *loader.Loader, bniPaths, implPaths []string) {
 	for _, p := range bniPaths {
 		ldr.AddBniPath(p)
@@ -170,11 +168,12 @@ func applyPathFlags(ldr *loader.Loader, bniPaths, implPaths []string) {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: binate [-v] [--root dir] [-I dirs] [-L dirs] <file.bn|dir> [...] [-- args...]\n")
-	fmt.Fprintf(os.Stderr, "       binate [-v] --test [--root dir] [-I dirs] [-L dirs] <pkg/foo> [pkg/bar ...]\n")
+	fmt.Fprintf(os.Stderr, "usage: binate [-v] [-I dirs] [-L dirs] <file.bn|dir> [...] [-- args...]\n")
+	fmt.Fprintf(os.Stderr, "       binate [-v] --test [-I dirs] [-L dirs] <pkg/foo> [pkg/bar ...]\n")
 	fmt.Fprintf(os.Stderr, "  -I, --interface-path  colon-separated dirs searched for .bni files\n")
 	fmt.Fprintf(os.Stderr, "  -L, --impl-path       colon-separated dirs searched for impl dirs\n")
-	fmt.Fprintf(os.Stderr, "  --root <dir>          sugar for -I <dir> -L <dir>\n")
+	fmt.Fprintf(os.Stderr, "                        (the first -I entry doubles as the project root\n")
+	fmt.Fprintf(os.Stderr, "                         for default builtin / .bni lookup; cwd if no -I)\n")
 	os.Exit(1)
 }
 
@@ -211,7 +210,7 @@ func expandDirArgs(args []string) []string {
 
 // runDirTests runs Test* functions in a main package directory.
 // It loads all .bn files (including _test.bn) from the directory.
-func runDirTests(root string, addRoots, bniPaths, implPaths []string, dir string, verbose bool) {
+func runDirTests(bniPaths, implPaths []string, dir string, verbose bool) {
 	// Collect all .bn files in the directory (including _test.bn)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -260,7 +259,8 @@ func runDirTests(root string, addRoots, bniPaths, implPaths []string, dir string
 		os.Exit(1)
 	}
 
-	// Project root
+	// Project root: first -I entry, else cwd.
+	root := primaryRoot(bniPaths)
 	if root == "" {
 		root, err = os.Getwd()
 		if err != nil {
@@ -271,9 +271,6 @@ func runDirTests(root string, addRoots, bniPaths, implPaths []string, dir string
 
 	// Load imports
 	ldr := loader.New(root)
-	for _, ar := range addRoots {
-		ldr.AddRoot(ar)
-	}
 	applyPathFlags(ldr, bniPaths, implPaths)
 	ldr.Verbose = verbose
 	ldr.RegisterBuiltin("pkg/bootstrap")
@@ -369,7 +366,8 @@ func runDirTests(root string, addRoots, bniPaths, implPaths []string, dir string
 }
 
 // runTests runs Test* functions in the specified packages.
-func runTests(root string, addRoots, bniPaths, implPaths []string, testPkgs []string, verbose bool) {
+func runTests(bniPaths, implPaths []string, testPkgs []string, verbose bool) {
+	root := primaryRoot(bniPaths)
 	var err error
 	if root == "" {
 		root, err = os.Getwd()
@@ -381,9 +379,6 @@ func runTests(root string, addRoots, bniPaths, implPaths []string, testPkgs []st
 
 	// Set up loader with test packages enabled
 	ldr := loader.New(root)
-	for _, ar := range addRoots {
-		ldr.AddRoot(ar)
-	}
 	applyPathFlags(ldr, bniPaths, implPaths)
 	ldr.Verbose = verbose
 	ldr.RegisterBuiltin("pkg/bootstrap")
@@ -571,7 +566,7 @@ func lookupLocalTypeAlias(decls []ast.Decl, name string) ast.TypeExpr {
 }
 
 // runProgram runs a Binate program (the normal non-test mode).
-func runProgram(root string, addRoots, bniPaths, implPaths []string, filenames []string, progArgs []string, verbose bool) {
+func runProgram(bniPaths, implPaths []string, filenames []string, progArgs []string, verbose bool) {
 	// Validate all files are in the same directory
 	if len(filenames) > 1 {
 		dir0, err := filepath.Abs(filepath.Dir(filenames[0]))
@@ -624,7 +619,8 @@ func runProgram(root string, addRoots, bniPaths, implPaths []string, filenames [
 		os.Exit(1)
 	}
 
-	// Project root: -root flag, or current working directory
+	// Project root: first -I entry, else cwd.
+	root := primaryRoot(bniPaths)
 	if root == "" {
 		root, err = os.Getwd()
 		if err != nil {
@@ -635,9 +631,6 @@ func runProgram(root string, addRoots, bniPaths, implPaths []string, filenames [
 
 	// Load all imported packages
 	ldr := loader.New(root)
-	for _, ar := range addRoots {
-		ldr.AddRoot(ar)
-	}
 	applyPathFlags(ldr, bniPaths, implPaths)
 	ldr.Verbose = verbose
 	ldr.RegisterBuiltin("pkg/bootstrap")
